@@ -1,10 +1,9 @@
-fastmcp
-uvicorn
-pytest
-requests
-httpx
-
-msal
-python-dotenv
-# msal: Microsoft 인증을 위한 공식 라이브러리
-# python-dotenv: 환경 변수(ID 값들)를 안전하게 관리
+﻿fastapi==0.115.5
+fastmcp==2.11.2
+uvicorn==0.32.1
+httpx>=0.27.0
+pydantic>=2.10.0
+python-dotenv>=1.0.0
+loguru>=0.7.3
+msal>=1.30.0
+pydantic-settings>=2.6.0

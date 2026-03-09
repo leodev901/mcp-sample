@@ -1,161 +1,96 @@
-# MCP Mail Server (FastMCP)
+# MCP Sample (FastMCP)
 
-Microsoft Graph 메일 조회/발송 기능을 MCP 서버로 제공하는 샘플 프로젝트입니다.
+엔터프라이즈 환경을 고려한 FastMCP 서버 샘플입니다.
+핵심 목표는 기능 추가 속도와 운영 안정성의 균형입니다.
 
-## 1. 프로젝트 개요
-- `FastMCP` (MCP 서버를 빠르게 구성하는 파이썬 라이브러리) 기반 서버
-- Microsoft Graph API 연동으로 메일 조회/발송 도구 제공
-- HTTP 레벨 + MCP 도구 레벨 로깅 분리
-- `request_id` 기반 요청 추적
+## 문제 정의
+초기 단일 파일 구조는 빠르게 시작할 수 있지만, 기능이 늘면 다음 문제가 생깁니다.
+- `main.py` 비대화 (툴 등록/초기화/실행 코드 혼재)
+- 공통 코드 중복 (인증, 설정, 로깅, HTTP 호출)
+- 환경별 실행/import 불일치 (로컬 vs Docker/K8s)
 
-## 2. 주요 기능
-- `search_my_emails`: 최근 메일 조회
-- `search_unread_mail`: 읽지 않은 메일 조회
-- `send_my_email`: 메일 발송
-- `ping`: 서버 점검
-- `add`: 샘플 연산 도구
+## 접근 방법
+현재 프로젝트는 "과하지 않은 모듈화"를 기준으로 정리합니다.
+- `main.py`: 조립(Composition Root)과 실행 진입점만 담당
+- `core`: 전역 공통(설정/로깅/미들웨어)
+- `clients`: 외부 시스템 연동(HTTP/Graph)
+- `tools`: MCP 도메인 툴 등록(mail/calendar/todo/sharepoint/teams)
 
-## 3. 프로젝트 구조
+## 프로젝트 구조 (합의안)
 ```text
 app/
-  main.py                # FastMCP 서버 진입점, 도구 등록
-  auth.py                # MSAL 토큰 발급
-  config.py              # .env 설정 로드
-  logger_config.py       # 로깅 설정(Formatter/Filter/Handler)
-  http_middleware.py     # HTTP 요청 로깅 + request_id + 마스킹/요약
-  mcp_midleware.py       # MCP tool 호출 단위 로깅
+  main.py                     # 서버 생성/툴 등록/ASGI app 반환
+  server.py                   # 실험/샘플 엔트리(선택)
+
+  core/
+    config.py                 # Settings(.env 로딩, 회사별 MS365 설정)
+    logger_config.py          # 로깅 설정
+    http_middleware.py        # HTTP 레벨 미들웨어
+    mcp_midleware.py          # MCP tool 호출 레벨 미들웨어
+
+  clients/
+    http_client.py            # 공통 HTTP 호출 유틸(확장 포인트)
+    graph_client.py           # Microsoft Graph API 클라이언트
+
+  tools/
+    mail_tools.py
+    calendar_tools.py
+    to_do_tools.py
+    sharepoint_tools.py
+    teams_tools.py
 
 docs/
-  CODEX_WORKFLOW_GUIDE.md
   SKILL_GUIDE.md
   CODE_GUIDE.md
   EXAMPLE_GUIDE.md
   DIAGRAM_GUIDE.md
 ```
 
-## 4. 사전 준비
-- Python 3.11+
-- Node.js (MCP Inspector 사용 시)
-- Microsoft Entra ID 앱 등록 및 Graph 권한 부여
+## 설계 컨셉
+- 경량 모듈화: 폴더를 과도하게 쪼개지 않고 역할 단위로만 분리
+- 절대 import: `from app...` 형태로 통일
+- 실행 일관성: 로컬/컨테이너/쿠버네티스에서 동일한 엔트리 사용
+- 미들웨어 분리: HTTP 관점과 MCP Tool 관점을 분리해서 관측성 확보
 
-### 필수 Graph 권한
-- `Mail.Read`
-- `Mail.Send`
-- 관리자 동의(Grant admin consent)
-
-### 4.1 MS Entra ID 앱 등록 상세 절차
-1. Azure Portal에서 `Microsoft Entra ID`로 이동 후 `앱 등록(App registrations)` 클릭
-2. `+ 새 등록(New registration)` 클릭
-3. 이름 입력 (예: `FastMCP-Mail`)
-4. 지원 계정 유형은 개인 환경 포함 옵션 선택
-  - `모든 조직 디렉터리의 계정 및 개인 Microsoft 계정`
-5. 등록 완료 후 `애플리케이션 ID(Client ID)`와 `디렉터리 ID(Tenant ID)`를 메모
-
-### 4.2 API 권한 부여 (.default 스코프 기준)
-1. 등록한 앱에서 `API 권한(API permissions)` 이동
-2. `+ 권한 추가(Add a permission)` 클릭
-3. `Microsoft Graph` 선택
-4. `애플리케이션 권한(Application permissions)` 선택
-5. `Mail.Read` 추가
-6. 메일 발송 사용 시 `Mail.Send`도 추가
-7. `관리자 동의 부여(Grant admin consent)` 실행
-
-참고:
-- 현재 코드(`app/auth.py`)는 아래 스코프를 사용합니다.
-```python
-SCOPES = ["https://graph.microsoft.com/.default"]
-```
-- 따라서 토큰은 위에서 승인된 애플리케이션 권한 기준으로 발급됩니다.
-
-### 4.3 클라이언트 자격 증명(Client Secret) 생성
-1. 앱 등록 화면에서 `인증서 및 비밀(Certificates & secrets)` 이동
-2. `새 클라이언트 비밀(New client secret)` 생성
-3. 발급 직후 `값(Value)`을 복사하여 안전한 곳에 보관
-4. `.env`의 `AZURE_CLIENT_SECRET`에 설정
-
-### 4.4 `.env`에 등록 정보 반영
-아래 4개 값은 반드시 실제 테넌트 값으로 채웁니다.
-```env
-AZURE_CLIENT_ID=...
-AZURE_TENANT_ID=...
-AZURE_CLIENT_SECRET=...
-DEFAULT_USER_EMAIL=...
+## 실행 방법
+### 로컬 개발
+```powershell
+.\.venv\Scripts\pip.exe install -r requirements.txt
+.\.venv\Scripts\python.exe -m app.main
 ```
 
-## 5. 설치 및 실행
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-### `.env` 예시
-```env
-AZURE_CLIENT_ID=...
-AZURE_TENANT_ID=...
-AZURE_CLIENT_SECRET=...
-DEFAULT_USER_EMAIL=no-reply@company.com
-LOG_LEVEL=INFO
-```
-
-### 서버 실행
-```bash
-./.venv/bin/python app/main.py
-```
-
-### 테스트 실행
-```bash
-PYTHONPATH=. ./.venv/bin/pytest -q
-```
-
-## 6. Inspector 연결
 ```bash
 npx @modelcontextprotocol/inspector
 ```
-- Transport Type: `streamable-http`
-- URL: `http://127.0.0.1:8000/mcp`
 
-## 7. 로깅 설계
-### 7.1 HTTP 레벨 로깅
-- 파일: `app/http_middleware.py`
-- 기능:
-1. `x-request-id` 생성/전파
-2. 허용 헤더만 기록(allowlist)
-3. payload 요약 기록(summary)
-4. 민감 키 마스킹(masking)
-
-### 7.2 MCP 도구 레벨 로깅
-- 파일: `app/mcp_midleware.py`
-- 기능:
-1. 도구명
-2. 실행 시간(`elapsed_ms`)
-3. 성공/실패
-4. 인자 키 목록
-
-### 7.3 로그 정책
-- 원문 body 전체 저장 지양
-- 민감정보(`token`, `secret`, `password`, `body`) 마스킹
-- 운영은 `INFO`, 분석 시에만 제한적으로 `DEBUG`
-
-## 8. 트러블슈팅
-### `GET /mcp` 404
-- 원인: 기존/만료 세션 재사용
-- 해결: Inspector 연결 재설정 후 재시도
-
-### `MCPLoggingMiddleware() takes no arguments`
-- 원인: 클래스 자체 등록
-- 해결:
-```python
-mcp.add_middleware(MCPLoggingMiddleware())
+### 운영 권장 (uvicorn)
+```powershell
+.\.venv\Scripts\uvicorn.exe app.main:app --host 0.0.0.0 --port 8002
 ```
 
-### DEBUG 로그 과다
-- 원인: 외부 라이브러리 로거까지 DEBUG 노출
-- 해결: `logger_config.py`에서 `sse_starlette` 등 로거 레벨 조정
+### Docker/K8s 권장 커맨드
+```bash
+uvicorn app.main:app --host 0.0.0.0 --port 8002
+```
 
-## 9. 문서 안내
-- 워크플로우: `docs/CODEX_WORKFLOW_GUIDE.md`
-- 개념/실수포인트: `docs/SKILL_GUIDE.md`
-- 코드 흐름: `docs/CODE_GUIDE.md`
-- 실행 예시: `docs/EXAMPLE_GUIDE.md`
-- 다이어그램: `docs/DIAGRAM_GUIDE.md`
+## import 규칙
+- 권장: `from app.tools.calendar_tools import register_calendar_tools`
+- 비권장: `from tools.calendar_tools import ...`
+
+이유:
+- 작업 디렉터리/실행 방식에 덜 민감하고, 배포 환경에서 경로 문제가 줄어듭니다.
+
+## 미들웨어 규칙
+- HTTP 미들웨어: 요청/응답, 헤더, request_id, 상태코드 로깅
+- MCP 미들웨어: tool 이름, 인자 키, 실행 시간, 예외 로깅
+
+둘은 레이어가 달라서 운영에서는 보통 함께 사용합니다.
+
+## 검증 체크리스트
+- `python -m app.main`로 import 오류 없이 기동되는가
+- `uvicorn app.main:app`로 동일하게 기동되는가
+- `tools` 추가 시 `main.py` 변경 최소화가 지켜지는가
+- `core`에 도메인 로직이 섞이지 않았는가
+
+## 한 줄 요약
+이 프로젝트는 `main.py(조립) + core(공통) + clients(외부연동) + tools(도메인)`의 경량 구조로, 엔터프라이즈 운영(Docker/K8s)까지 고려한 FastMCP 기준선입니다.
