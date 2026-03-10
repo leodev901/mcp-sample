@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     DEFAULT_COMPANY_CD: str = ""
 
     LOG_LEVEL: str
+    AUTH_JWT_USER_TOKEN:bool = False
+
 
     # Company-wise MS365 config JSON string.
     MS365_CONFIGS: str = "{}"

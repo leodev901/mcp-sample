@@ -2,16 +2,16 @@ import time
 from typing import Any
 
 from fastmcp.server.middleware.middleware import CallNext, Middleware, MiddlewareContext
+from loguru import logger
 from mcp.types import CallToolRequestParams
 
-from app.core.logger_config import get_logger
-
-logger = get_logger("app.mcp.tool")
+from app.core.mcp_context import get_trace_id
 
 
 class MCPLoggingMiddleware(Middleware):
     """
-    MCP tool 호출 단위 관측 로그를 남긴다.
+    HTTP 요청에서 저장한 trace_id를 MCP tool 로그에도 붙인다.
+    그래서 HTTP 로그 한 줄과 tool 로그 한 줄을 바로 연결해서 볼 수 있다.
     """
 
     async def on_call_tool(
@@ -21,28 +21,23 @@ class MCPLoggingMiddleware(Middleware):
     ) -> Any:
         params = context.message
         tool_name = params.name
-
-        # 왜: 인자 원문을 남기면 민감정보 유출 위험이 있으므로 key 목록만 기록한다.
-        argument_keys = list((params.arguments or {}).keys())
+        arguments = params.arguments or {}
+        # argument_keys = list(arguments.keys())
+        trace_id = get_trace_id()
 
         started = time.perf_counter()
         try:
             result = await call_next(context)
             elapsed_ms = (time.perf_counter() - started) * 1000.0
-
             logger.info(
-                "mcp_tool_call tool=%s status=success elapsed_ms=%.1f argument_keys=%s",
-                tool_name,
-                elapsed_ms,
-                argument_keys,
+                f"[mcp_tool_call] >>> trace_id={trace_id}"
+                f" tool={tool_name} status=success elapsed_ms={elapsed_ms:.1f} arguments={arguments}"
             )
             return result
         except Exception:
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             logger.exception(
-                "mcp_tool_call tool=%s status=error elapsed_ms=%.1f argument_keys=%s",
-                tool_name,
-                elapsed_ms,
-                argument_keys,
+                f"[mcp_tool_call] >>> trace_id={trace_id}"
+                f" tool={tool_name} status=error elapsed_ms={elapsed_ms:.1f} arguments={arguments}"
             )
             raise

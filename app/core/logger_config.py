@@ -23,6 +23,10 @@ def set_request_id(request_id: str) -> None:
 def clear_request_id() -> None:
     _request_id_ctx.set("-")
 
+
+def get_request_id() -> str:
+    return _request_id_ctx.get()
+
 def setup_logging(log_level: str = "INFO") -> None:
     """
     앱 전체에서 공통으로 사용할 콘솔 로그 포맷을 설정한다.
@@ -103,7 +107,7 @@ class DecodeBytesFilter(logging.Filter):
     @staticmethod
     def _decode(value):
         if isinstance(value, (bytes, bytearray)):
-            # 왜: 라이브러리 DEBUG 로그에서 bytes가 그대로 찍히면 한글이 \x.. 형태로 깨져 보인다.
+            # 라이브러리 DEBUG 로그에서 bytes가 그대로 찍히면 한글이 \x.. 형태로 깨져 보인다.
             return value.decode("utf-8", errors="replace")
         if isinstance(value, tuple):
             return tuple(DecodeBytesFilter._decode(v) for v in value)

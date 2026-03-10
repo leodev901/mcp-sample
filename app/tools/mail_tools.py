@@ -1,87 +1,86 @@
-# from fastmcp import FastMCP
-# from typing import Optional, Annotated, Literal, List, Dict, Any
-# import httpx
-# from auth import get_access_token
-# from config import settings
+from fastmcp import FastMCP
 
-# DEFAULT_USER_EMAIL = settings.DEFAULT_USER_EMAIL
+from loguru import logger
+from typing import Annotated,Optional
+from datetime import datetime
+
+from app.clients.graph_client import graph_request
 
 def register_mail_tools(mcp: FastMCP):
 
-    # def _build_base_filter(from_date: Optional[str] = None, to_date: Optional[str] = None) -> str:
-    #     filters = []
-    #     if from_date:
-    #         filters.append(f"receivedDateTime ge {from_date}T00:00:00Z")
-    #     if to_date:
-    #         filters.append(f"receivedDateTime le {to_date}T23:59:59Z")
-    #     return " and ".join(filters)
+    def _build_base_filter(from_date: Optional[str] = None, to_date: Optional[str] = None) -> str:
+        filters = []
+        if from_date:
+            filters.append(f"receivedDateTime ge {from_date}T00:00:00Z")
+        if to_date:
+            filters.append(f"receivedDateTime le {to_date}T23:59:59Z")
+        return " and ".join(filters)
 
 
-    # @mcp.tool()
-    # async def get_recent_emails(
-    #     tok_k: Annotated[int, "가져올 메일의 최대 개수 (1에서 50 사이의 정수)"] = 10,
-    #     from_date: Annotated[Optional[str], "조회 시작일 (YYYY-MM-DD 형식). 특정 기간이 주어지면 입력합니다."] = None,
-    #     to_date: Annotated[Optional[str], "조회 종료일 (YYYY-MM-DD 형식). 특정 기간이 주어지면 입력합니다."] = None,
-    #     email: Annotated[Optional[str], "메일을 조회할 사용자의 이메일 주소 (예: user@company.com). 특정인 지정이 없으면 비워둡니다."] = None
-    # ) -> list:
-    #     """
-    #     기간 내 최근 순서로 받은 메일을 조회합니다.
-    #     Microsoft Graph API를 사용하여 메일함에서 최근 수신된 이메일 목록을 읽어옵니다.
+    @mcp.tool()
+    async def get_recent_emails(
+        tok_k: Annotated[int, "가져올 메일의 최대 개수 (1에서 50 사이의 정수)"] = 10,
+        from_date: Annotated[Optional[str], "조회 시작일 (YYYY-MM-DD 형식). 특정 기간이 주어지면 입력합니다."] = None,
+        to_date: Annotated[Optional[str], "조회 종료일 (YYYY-MM-DD 형식). 특정 기간이 주어지면 입력합니다."] = None,
+        email: Annotated[Optional[str], "메일을 조회할 사용자의 이메일 주소 (예: user@company.com). 특정인 지정이 없으면 비워둡니다."] = None
+    ) -> list:
+        """
+        기간 내 최근 순서로 받은 메일을 조회합니다.
+        Microsoft Graph API를 사용하여 메일함에서 최근 수신된 이메일 목록을 읽어옵니다.
 
-    #     [LLM 에이전트 사용 가이드]
-    #     1. 사용자가 "최근 메일 확인해줘" 혹은 "특정 기간의 최근 메일 보여줘"라고 요청할 때 호출하세요.
-    #     2. 파라미터로 개수(tok_k)와 날짜/기간(from_date, to_date)을 필터로 걸 수 있습니다.
-    #     3. 반환값은 딕셔너리(dict) 요소들로 구성된 형태의 리스트(list)입니다. 필요한 항목(제목, 보낸사람, 받은 시간 등)을 가공하여 사용자에게 응답하세요.
+        [LLM 에이전트 사용 가이드]
+        1. 사용자가 "최근 메일 확인해줘" 혹은 "특정 기간의 최근 메일 보여줘"라고 요청할 때 호출하세요.
+        2. 파라미터로 개수(tok_k)와 날짜/기간(from_date, to_date)을 필터로 걸 수 있습니다.
+        3. 반환값은 딕셔너리(dict) 요소들로 구성된 형태의 리스트(list)입니다. 필요한 항목(제목, 보낸사람, 받은 시간 등)을 가공하여 사용자에게 응답하세요.
 
-    #     Args:
-    #         - tok_k (int): 가져올 메일의 최대 개수 (기본값: 10, 최대: 50)
-    #         - from_date (str, optional): 조회 시작일 (YYYY-MM-DD 형식)
-    #         - to_date (str, optional): 조회 종료일 (YYYY-MM-DD 형식)
-    #         - email (str, optional): 조회 대상 사용자의 이메일 주소 (비워둘 경우 기본 사용자)
+        Args:
+            - tok_k (int): 가져올 메일의 최대 개수 (기본값: 10, 최대: 50)
+            - from_date (str, optional): 조회 시작일 (YYYY-MM-DD 형식)
+            - to_date (str, optional): 조회 종료일 (YYYY-MM-DD 형식)
+            - email (str, optional): 조회 대상 사용자의 이메일 주소 (비워둘 경우 기본 사용자)
 
-    #     Returns:
-    #         list: 조건에 맞는 메일 정보들을 담고 있는 딕셔너리의 리스트입니다.
-    #             예시: [{"id": "...", "subject": "...", "sender_address": "...", "sender_name": "...", "received_time": "..."}]
-    #             에러가 발생할 경우, 리스트에 단일 딕셔너리 형태로 에러 메시지가 반환될 수 있습니다 (예: [{"error": "..."}]).
-    #     """
-    #     try:
-    #         target_email = email if email else DEFAULT_USER_EMAIL
-    #         token = get_access_token()
+        Returns:
+            list: 조건에 맞는 메일 정보들을 담고 있는 딕셔너리의 리스트입니다.
+                예시: [{"id": "...", "subject": "...", "sender_address": "...", "sender_name": "...", "received_time": "..."}]
+                에러가 발생할 경우, 리스트에 단일 딕셔너리 형태로 에러 메시지가 반환될 수 있습니다 (예: [{"error": "..."}]).
+        """
+        try:
+            target_email = email 
+            
+            path = {
+                "/messages"
+                "$top": max(1, min(tok_k, 50)),
+                "$select": "id,subject,sender,receivedDateTime",
+                "$orderby": "receivedDateTime desc"
+            }
 
-    #         endpoint = f"https://graph.microsoft.com/v1.0/users/{target_email}/messages"
-    #         params = {
-    #             "$top": max(1, min(tok_k, 50)),
-    #             "$select": "id,subject,sender,receivedDateTime",
-    #             "$orderby": "receivedDateTime desc"
-    #         }
+            base_filter = _build_base_filter(from_date, to_date)
+            if base_filter:
+                params["$filter"] = base_filter
 
-    #         base_filter = _build_base_filter(from_date, to_date)
-    #         if base_filter:
-    #             params["$filter"] = base_filter
+            headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
 
-    #         headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.get(endpoint, headers=headers, params=params)
 
-    #         async with httpx.AsyncClient(timeout=15.0) as client:
-    #             response = await client.get(endpoint, headers=headers, params=params)
+            if response.status_code != 200:
+                return [{"error": f"메일 조회 실패(HTTP {response.status_code}): {response.text}"}]
 
-    #         if response.status_code != 200:
-    #             return [{"error": f"메일 조회 실패(HTTP {response.status_code}): {response.text}"}]
+            emails = response.json().get("value", [])
 
-    #         emails = response.json().get("value", [])
+            parsed_emails = []
+            for msg in emails:
+                parsed_emails.append({
+                    "id": msg.get("id"),
+                    "subject": msg.get("subject", "(제목 없음)"),
+                    "sender_address": msg.get("sender", {}).get("emailAddress", {}).get("address", "알 수 없음"),
+                    "sender_name": msg.get("sender", {}).get("emailAddress", {}).get("name", "알 수 없음"),
+                    "received_time": msg.get("receivedDateTime")
+                })
 
-    #         parsed_emails = []
-    #         for msg in emails:
-    #             parsed_emails.append({
-    #                 "id": msg.get("id"),
-    #                 "subject": msg.get("subject", "(제목 없음)"),
-    #                 "sender_address": msg.get("sender", {}).get("emailAddress", {}).get("address", "알 수 없음"),
-    #                 "sender_name": msg.get("sender", {}).get("emailAddress", {}).get("name", "알 수 없음"),
-    #                 "received_time": msg.get("receivedDateTime")
-    #             })
-
-    #         return parsed_emails
-    #     except Exception as e:
-    #         raise RuntimeError(f"최근 메일 조회 도중 오류 발생: {str(e)}")
+            return parsed_emails
+        except Exception as e:
+            raise RuntimeError(f"최근 메일 조회 도중 오류 발생: {str(e)}")
 
 
     # @mcp.tool()
