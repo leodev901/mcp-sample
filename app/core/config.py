@@ -31,9 +31,12 @@ class Settings(BaseSettings):
     DEFAULT_COMPANY_CD: str = ""
 
     LOG_LEVEL: str
+    ENV: str = "local"
     AUTH_JWT_USER_TOKEN:bool = False
 
     GRAFANA_ENDPOINT: str = "http://grafana-alloy.grafana-alloy:4317"
+    GRAFANA_INSTANCE_ID: str = ""
+    GRAFANA_API_TOKEN: str = ""
 
     # Company-wise MS365 config JSON string.
     MS365_CONFIGS: str = "{}"

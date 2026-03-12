@@ -4,7 +4,9 @@ from app.core.http_middleware import HttpMiddleware
 from app.core.http_asgi_middleware import HttpLoggingASGIMiddleware
 from app.core.mcp_midleware import MCPLoggingMiddleware
 from app.tools.calendar_tools import register_calendar_tools
+from app.common.logger import init_logger
 
+init_logger()
 
 def create_app():
     mcp = FastMCP(
@@ -23,6 +25,7 @@ def create_app():
     return app
 
 app = create_app()
+
 
 
 # if __name__ == "__main__":

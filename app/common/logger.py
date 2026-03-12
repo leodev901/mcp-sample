@@ -2,14 +2,20 @@ from typing import Optional
 import os
 import platform
 
-from logger import logger
+from loguru import logger
 from opentelemetry._logs import set_logger_provider
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.resources import Resource
 
+import base64
+import logging
+
+
 from app.core.config import settings
+from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+# from opentelemetry.exporter.otlp.proto.grpc.log_exporter import OTLPLogExporter
 
 _open_telemetry_provider: Optional[LoggerProvider] = None
 
@@ -28,18 +34,28 @@ def _init_open_telemetry_provider() -> None:
         _open_telemetry_provider = LoggerProvider(
             resource=Resource.create(
                 {
-                    "service.name": "mcp-ms365",
+                    "service.name": "mcp-sample",
                     "service.version": "1.0.0",
                     "service.instance.id": os.getenv("POD_NAME", platform.node()),
                 }
             )
         )
 
+        # Grafana Cloud용 인증 토큰(Basic Auth) 만들기
+        username = settings.GRAFANA_INSTANCE_ID.strip()
+        password = settings.GRAFANA_API_TOKEN.strip()
+        auth_string = base64.b64encode(f"{username}:{password}".encode()).decode()
+
         # 2. Exporter 설정: 수집된 로그를 '어디로' 보낼지 결정합니다.
         # 여기서는 Grafana(그라파나) 엔드포인트로 설정하여 로그를 전송합니다.
         exporter = OTLPLogExporter(
+            # endpoint=settings.GRAFANA_ENDPOINT,
+            # insecure=True # HTTPS가 아닌 HTTP 통신을 허용합니다 (보안이 확실한 내부망에서 주로 사용)
+
+            # leodev901 grafana 연결하기
             endpoint=settings.GRAFANA_ENDPOINT,
-            insecure=True # HTTPS가 아닌 HTTP 통신을 허용합니다 (보안이 확실한 내부망에서 주로 사용)
+            # insecure 매개변수 삭제 (URL의 https://를 보고 자동 판단함)
+            headers={"Authorization": f"Basic {auth_string}"} # 헤더 키를 대문자로 변경
         )
 
         # 3. Processor 설정: 로그를 건건이 보내서 성능이 떨어지는 것을 막고자,
@@ -51,6 +67,9 @@ def _init_open_telemetry_provider() -> None:
         # 4. 전역 Provider로 등록: 
         # OpenTelemetry 시스템이 이제부터 위에서 만든 설정을 사용하도록 적용합니다.
         set_logger_provider(_open_telemetry_provider)
+        
+        print(f"✅ OpenTelemetry(OTLP) Exporter initialized. [Service: mcp-sample]")
+        print(f"   - Endpoint: {settings.GRAFANA_ENDPOINT}")
 
 
 
@@ -61,8 +80,10 @@ def init_logger() -> None:
     """
     global _open_telemetry_provider
 
-    # 로컬 개발 환경("local")에서는 굳이 외부 Grafana로 로그를 보내지 않기 위한 방어 로직입니다.
-    if _open_telemetry_provider is None and getattr(settings, "env", "local") != "local":
+    # Grafana 설정이 있는 경우 강제로 활성화하거나, 'local'이 아닐 때 작동
+    is_grafana_configured = bool(settings.GRAFANA_ENDPOINT and settings.GRAFANA_API_TOKEN)
+    
+    if _open_telemetry_provider is None and (is_grafana_configured or getattr(settings, "ENV", "local") != "local"):
         _init_open_telemetry_provider() # 위에서 만든 OPTL 초기화 로직 실행
 
         # 5. Handler 설정: 기존 파이썬/Loguru 로깅 시스템과 OpenTelemetry를 연결해주는 다리(Handler)를 만듭니다.
