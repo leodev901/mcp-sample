@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str
     AUTH_JWT_USER_TOKEN:bool = False
 
+    GRAFANA_ENDPOINT: str = "http://grafana-alloy.grafana-alloy:4317"
 
     # Company-wise MS365 config JSON string.
     MS365_CONFIGS: str = "{}"
