@@ -8,6 +8,16 @@ from app.clients.graph_client import graph_request
 
 def register_mail_tools(mcp: FastMCP):
 
+    def _get_request_current_user():
+        try:
+            current_user = request.state.user
+            return current_user
+        except Exception as e:
+            logger.error(f"현재 사용자 정보를 가져오는 중 오류 발생: {str(e)}")
+            return None
+
+
+
     def _build_base_filter(from_date: Optional[str] = None, to_date: Optional[str] = None) -> str:
         filters = []
         if from_date:
@@ -16,28 +26,28 @@ def register_mail_tools(mcp: FastMCP):
             filters.append(f"receivedDateTime le {to_date}T23:59:59Z")
         return " and ".join(filters)
 
+    
 
     @mcp.tool()
     async def get_recent_emails(
-        tok_k: Annotated[int, "가져올 메일의 최대 개수 (1에서 50 사이의 정수)"] = 10,
-        from_date: Annotated[Optional[str], "조회 시작일 (YYYY-MM-DD 형식). 특정 기간이 주어지면 입력합니다."] = None,
-        to_date: Annotated[Optional[str], "조회 종료일 (YYYY-MM-DD 형식). 특정 기간이 주어지면 입력합니다."] = None,
-        email: Annotated[Optional[str], "메일을 조회할 사용자의 이메일 주소 (예: user@company.com). 특정인 지정이 없으면 비워둡니다."] = None
+        tok_k: Annotated[int, "가져올 메일의 최대 개수 (1에서 50 사이의 정수, 기본 10)"] = 10,
+        from_date: Annotated[Optional[str], "조회 시작일 (YYYY-MM-DD 형식). 조회시작일 기간이 주어지면 입력합니다."] = None,
+        to_date: Annotated[Optional[str], "조회 종료일 (YYYY-MM-DD 형식). 조회종료일 기간이 주어지면 입력합니다."] = None,
+        # email: Annotated[Optional[str], "메일을 조회할 사용자의 이메일 주소 (예: user@company.com). 특정인 지정이 없으면 비워둡니다."] = None
     ) -> list:
         """
         기간 내 최근 순서로 받은 메일을 조회합니다.
         Microsoft Graph API를 사용하여 메일함에서 최근 수신된 이메일 목록을 읽어옵니다.
 
         [LLM 에이전트 사용 가이드]
-        1. 사용자가 "최근 메일 확인해줘" 혹은 "특정 기간의 최근 메일 보여줘"라고 요청할 때 호출하세요.
-        2. 파라미터로 개수(tok_k)와 날짜/기간(from_date, to_date)을 필터로 걸 수 있습니다.
+        1. 사용자가 "최근 메일 확인해줘" 혹은 "오늘 메일 보여줘 보여줘"라고 요청할 때 호출하세요.
+        2. 파라미터로 개수(tok_k)와 날짜 기간(from_date, to_date)을 필터를 선택적으로 적용 할 수 있습니다.
         3. 반환값은 딕셔너리(dict) 요소들로 구성된 형태의 리스트(list)입니다. 필요한 항목(제목, 보낸사람, 받은 시간 등)을 가공하여 사용자에게 응답하세요.
 
         Args:
             - tok_k (int): 가져올 메일의 최대 개수 (기본값: 10, 최대: 50)
             - from_date (str, optional): 조회 시작일 (YYYY-MM-DD 형식)
             - to_date (str, optional): 조회 종료일 (YYYY-MM-DD 형식)
-            - email (str, optional): 조회 대상 사용자의 이메일 주소 (비워둘 경우 기본 사용자)
 
         Returns:
             list: 조건에 맞는 메일 정보들을 담고 있는 딕셔너리의 리스트입니다.
@@ -45,7 +55,14 @@ def register_mail_tools(mcp: FastMCP):
                 에러가 발생할 경우, 리스트에 단일 딕셔너리 형태로 에러 메시지가 반환될 수 있습니다 (예: [{"error": "..."}]).
         """
         try:
-            target_email = email 
+            
+            current_user = _get_request_current_user()
+
+            if not current_user:
+                raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
+            
+            query_email = current_user.email or "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
+            compnay_cd = current_user.company_cd or "leodev901"  #DEFAULT_COMPANY_CD
             
             path = {
                 "/messages"
