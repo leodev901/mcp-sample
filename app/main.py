@@ -4,6 +4,7 @@ from app.core.http_middleware import HttpMiddleware
 from app.core.http_asgi_middleware import HttpLoggingASGIMiddleware
 from app.core.mcp_midleware import MCPLoggingMiddleware
 from app.tools.calendar_tools import register_calendar_tools
+from app.tools.mail_tools import register_mail_tools
 from app.common.logger import init_logger
 
 init_logger()
@@ -15,6 +16,7 @@ def create_app():
     )
 
     register_calendar_tools(mcp)
+    register_mail_tools(mcp)
     mcp.add_middleware(MCPLoggingMiddleware())
 
     app = mcp.http_app(path="/mcp", transport="streamable-http")

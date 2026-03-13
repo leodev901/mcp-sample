@@ -79,6 +79,7 @@ async def graph_request(
     user_email: str | None = None,
     json_body: dict | None = None,
     company_cd: str = "leodev901",
+    custom_headers: dict | None = None,
 ) -> dict:
     """Common wrapper for Microsoft Graph user-scoped APIs."""
 
@@ -99,7 +100,8 @@ async def graph_request(
 
     url = f"{GRAPH_BASE}/users/{email}{path}"
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
-
+    if custom_headers:
+        headers.update(custom_headers)
 
     start_time = time.perf_counter() # 타이머 시작
     req_body = {
