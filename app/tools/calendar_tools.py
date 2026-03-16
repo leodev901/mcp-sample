@@ -11,9 +11,15 @@ from app.models.user_info import UserInfo
 
 current_time = datetime.now().isoformat(timespec="seconds")
 
+BLACKLIST = [
+    "admin@skcc.com",
+]
 
 
 def register_calendar_tools(mcp: FastMCP):
+
+    def _is_black_list(email: str) -> bool:
+        return email in BLACKLIST
 
     def _get_request_current_user() -> UserInfo | None:
         # Tool 이 HTTP 요청 바깥에서도 호출될 수 있어, 요청이 없으면 None 으로 둔다.
@@ -65,6 +71,22 @@ def register_calendar_tools(mcp: FastMCP):
             "weblink": event.get("webLink"),
         }
     
+    def _serialize_calendar_event_detail(event: dict) -> dict:
+        """Graph 일정 응답에서 단일 상세 조회 시 필요한 전체 필드를 정리한다."""
+        base_event = _serialize_calendar_event(event)
+        
+        # 상세 정보 추가
+        base_event.update({
+            "body_content": event.get("body", {}).get("content", ""),
+            "body_preview": event.get("bodyPreview", ""),
+            "importance": event.get("importance", ""),
+            "response_status": event.get("responseStatus", {}).get("response", ""),
+            "created_time": event.get("createdDateTime", ""),
+            "last_modified_time": event.get("lastModifiedDateTime", ""),
+            "recurrence": event.get("recurrence"),
+        })
+        return base_event
+
 
     @mcp.tool()
     async def check_company_token(company_cd:str ):
@@ -115,6 +137,9 @@ def register_calendar_tools(mcp: FastMCP):
         # 우선순위 1. 토큰 사용자 정보 -> 2. Default 값
         query_company_cd = ( current_user.company_cd if current_user else None ) or "leodev901"  #DEFAULT_COMPANY_CD
         
+        if _is_black_list(query_email):
+             raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
+
         path=(
             f"/calendarView"
             f"?startDateTime={start_date}"
@@ -131,4 +156,194 @@ def register_calendar_tools(mcp: FastMCP):
         )
 
         return [_serialize_calendar_event(event) for event in result.get("value", [])]
+
+
+    @mcp.tool()
+    async def get_calendar_event(
+        event_id: Annotated[str, "조회할 일정의 고유 ID (필수)"],
+        user_email: Annotated[Optional[str], "조회 대상자의 이메일 주소 (예: sample@microsoft.com)"] = "admin@leodev901.onmicrosoft.com",
+    ) -> dict:
+        """단일 캘린더 일정의 상세 정보를 조회합니다.
+        
+        [LLM 에이전트 가이드]
+        1. 목록 조회 후 특정 일정의 구체적인 내용을 확인할 때 사용합니다.
+        """
+        current_user = _get_request_current_user()
+        if not current_user:
+            raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
+            
+        query_email = user_email or current_user.email or "admin@leodev901.onmicrosoft.com"
+        query_company_cd = current_user.company_cd or "leodev901"
+        
+        if _is_black_list(query_email):
+             raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
+
+        path = f"/events/{event_id}"
+        
+        try:
+            result = await graph_request(
+                method="GET",
+                path=path,
+                user_email=query_email,
+                company_cd=query_company_cd
+            )
+            return _serialize_calendar_event_detail(result)
+        except Exception as e:
+            raise RuntimeError(f"일정 상세 조회 중 오류 발생: {str(e)}")
+
+
+    @mcp.tool()
+    async def create_calendar_event(
+        subject: Annotated[str, "일정 제목 (필수)"],
+        start_date: Annotated[str, "일정 시작 일시 (ISO 8601, KST 기준, 예: 2026-03-01T10:00:00)"],
+        end_date: Annotated[str, "일정 종료 일시 (ISO 8601, KST 기준, 예: 2026-03-01T11:00:00)"],
+        user_email: Annotated[Optional[str], "생성 대상자의 이메일 주소"] = "admin@leodev901.onmicrosoft.com",
+        body: Annotated[Optional[str], "일정 상세 내용 (HTML 또는 일반 텍스트)"] = None,
+        location: Annotated[Optional[str], "일정 장소 이름"] = None,
+        attendees: Annotated[Optional[list[str]], "참석자 이메일 주소 목록 (예: ['user1@com', 'user2@com'])"] = None,
+        is_online_meeting: Annotated[Optional[bool], "Teams 온라인 회의 생성 여부"] = False,
+    ) -> dict:
+        """새로운 캘린더 일정을 생성합니다.
+        
+        [LLM 에이전트 가이드]
+        1. 사용자가 "내일 10시에 회의 일정 잡아줘" 등의 요청 시 사용합니다.
+        2. start_date와 end_date는 한국 시간(KST) 기준으로 작성해야 합니다.
+        """
+        current_user = _get_request_current_user()
+        if not current_user:
+            raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
+            
+        query_email = user_email or current_user.email or "admin@leodev901.onmicrosoft.com"
+        query_company_cd = current_user.company_cd or "leodev901"
+        
+        if _is_black_list(query_email):
+             raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
+
+        payload = {
+            "subject": subject,
+            "start": {"dateTime": start_date, "timeZone": "Asia/Seoul"},
+            "end": {"dateTime": end_date, "timeZone": "Asia/Seoul"}
+        }
+
+        if body:
+            payload["body"] = {"contentType": "HTML", "content": body}
+        if location:
+            payload["location"] = {"displayName": location}
+        if attendees:
+            payload["attendees"] = [
+                {"emailAddress": {"address": email.strip()}, "type": "required"} 
+                for email in attendees if email.strip()
+            ]
+        if is_online_meeting:
+            payload["isOnlineMeeting"] = True
+            payload["onlineMeetingProvider"] = "teamsForBusiness"
+
+        try:
+            result = await graph_request(
+                method="POST",
+                path="/events",
+                json_body=payload,
+                user_email=query_email,
+                company_cd=query_company_cd
+            )
+            return _serialize_calendar_event(result)
+        except Exception as e:
+            raise RuntimeError(f"일정 생성 중 오류 발생: {str(e)}")
+
+
+    @mcp.tool()
+    async def update_calendar_event(
+        event_id: Annotated[str, "수정할 일정의 고유 ID (필수)"],
+        user_email: Annotated[Optional[str], "조회 대상자의 이메일 주소"] = "admin@leodev901.onmicrosoft.com",
+        subject: Annotated[Optional[str], "변경할 일정 제목"] = None,
+        start_date: Annotated[Optional[str], "변경할 시작 일시 (KST)"] = None,
+        end_date: Annotated[Optional[str], "변경할 종료 일시 (KST)"] = None,
+        body: Annotated[Optional[str], "변경할 상세 내용"] = None,
+        location: Annotated[Optional[str], "변경할 장소"] = None,
+        attendees: Annotated[Optional[list[str]], "변경할 참석자 이메일 목록"] = None,
+        is_online_meeting: Annotated[Optional[bool], "온라인 회의 설정 여부"] = None,
+    ) -> dict:
+        """기존 캘린더 일정을 수정합니다.
+        
+        [LLM 에이전트 가이드]
+        1. 사용자가 기존 일정의 시간, 장소, 제목 등을 변경해달라고 할 때 사용합니다.
+        2. 변경하려는 파라미터만 값을 채워 넣으면 됩니다.
+        """
+        current_user = _get_request_current_user()
+        if not current_user:
+            raise ValueError("현재 사용자 정보를 찾을 수 없습니다.")
+            
+        query_email = user_email or current_user.email or "admin@leodev901.onmicrosoft.com"
+        query_company_cd = current_user.company_cd or "leodev901"
+        
+        if _is_black_list(query_email):
+             raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
+
+        payload = {}
+        if subject is not None:
+            payload["subject"] = subject
+        if start_date is not None:
+            payload["start"] = {"dateTime": start_date, "timeZone": "Asia/Seoul"}
+        if end_date is not None:
+            payload["end"] = {"dateTime": end_date, "timeZone": "Asia/Seoul"}
+        if body is not None:
+            payload["body"] = {"contentType": "HTML", "content": body}
+        if location is not None:
+            payload["location"] = {"displayName": location}
+        if attendees is not None:
+            payload["attendees"] = [
+                {"emailAddress": {"address": email.strip()}, "type": "required"} 
+                for email in attendees if email.strip()
+            ]
+        if is_online_meeting is not None:
+            payload["isOnlineMeeting"] = is_online_meeting
+            if is_online_meeting:
+                payload["onlineMeetingProvider"] = "teamsForBusiness"
+
+        if not payload:
+            raise ValueError("수정할 항목이 지정되지 않았습니다.")
+
+        try:
+            result = await graph_request(
+                method="PATCH",
+                path=f"/events/{event_id}",
+                json_body=payload,
+                user_email=query_email,
+                company_cd=query_company_cd
+            )
+            return _serialize_calendar_event(result)
+        except Exception as e:
+            raise RuntimeError(f"일정 수정 중 오류 발생: {str(e)}")
+
+
+    @mcp.tool()
+    async def delete_calendar_event(
+        event_id: Annotated[str, "삭제할 일정의 고유 ID (필수)"],
+        user_email: Annotated[Optional[str], "조회 대상자의 이메일 주소"] = "admin@leodev901.onmicrosoft.com",
+    ) -> dict:
+        """기존 캘린더 일정을 삭제합니다.
+        
+        [LLM 에이전트 가이드]
+        1. 사용자가 특정 일정을 취소/삭제해달라고 할 때 사용합니다.
+        """
+        current_user = _get_request_current_user()
+        if not current_user:
+            raise ValueError("현재 사용자 정보를 찾을 수 없습니다.")
+            
+        query_email = user_email or current_user.email or "admin@leodev901.onmicrosoft.com"
+        query_company_cd = current_user.company_cd or "leodev901"
+        
+        if _is_black_list(query_email):
+             raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
+
+        try:
+            await graph_request(
+                method="DELETE",
+                path=f"/events/{event_id}",
+                user_email=query_email,
+                company_cd=query_company_cd
+            )
+            return {"status": "success", "message": f"일정({event_id})이 성공적으로 삭제되었습니다."}
+        except Exception as e:
+            raise RuntimeError(f"일정 삭제 중 오류 발생: {str(e)}")
 

@@ -108,25 +108,43 @@ app/
 
 ## 선언된 도구(Tools) 목록
 소스 코드 내에 구현 및 선언되어 있는 주요 기능들입니다.
-*(현재 `main.py`에 등록되어 운영 중인 도구는 캘린더 관련 도구들뿐이며, 메일 도구 등은 향후 활성화를 위해 선언되어 있습니다.)*
+*(현재 `main.py`에 등록되어 운영 중인 도구는 캘린더, 메일, 팀즈, 쉐어포인트 도구들입니다.)*
 
 ### 1) 캘린더 도구 (`calendar_tools.py`)
 | 도구명 | 상태 | 설명 | 연동 API |
 | :-- | :--: | :-- | :-- |
 | `list_my_calendar_events` | ✅활성화 | 시작/종료일을 입력받아 내 캘린더 일정을 조회합니다. | `/calendarView` |
+| `get_calendar_event` | ✅활성화 | 단일 캘린더 일정의 매우 상세한 정보를 조회합니다. | `/events/{id}` |
+| `create_calendar_event` | ✅활성화 | 캘린더에 새로운 일정을 생성합니다. | `POST /events` |
+| `update_calendar_event` | ✅활성화 | 기존 캘린더 일정 내용(시간, 장소 등)을 부분 수정합니다. | `PATCH /events/{id}` |
+| `delete_calendar_event` | ✅활성화 | 기존 캘린더 일정을 삭제합니다. | `DELETE /events/{id}` |
 | `check_company_token` | ⚠️미구현 | 추후 JWT 토큰이나 회사 연동 검증을 위해 설계됨 (`NotImplementedError`) | - |
 
 ### 2) 메일 도구 (`mail_tools.py`)
 | 도구명 | 상태 | 설명 | 연동 API |
 | :-- | :--: | :-- | :-- |
-| `get_recent_emails` | ❌미등록 | 최근 수신된 이메일 목록 대략 조회 (`main.py`에 등록 필요) | `/messages` |
-| `get_unread_emails` | 💤주석 | 읽지 않은(`isRead=false`) 메일 조회 | `/messages` |
-| `get_important_or_flagged_emails` | 💤주석 | 중요함(`high`) 또는 깃발(`flagged`) 표시된 메일 조회 | `/messages` |
-| `search_emails_by_keyword_advanced` | 💤주석 | 이메일 제목 또는 본문에서 특정 키워드 풀텍스트 검색 | `/messages` |
-| `search_emails_by_sender_advanced` | 💤주석 | 발신자 메일/이름 기준으로 필터링 검색 | `/messages` |
-| `search_emails_by_attachment` | 💤주석 | 첨부파일 존재 여부 및 파일명/확장자별 필터 탐색 | `/messages` |
-| `get_sent_emails` | 💤주석 | 본인이 발송한 보낸 편지함(`sentitems`) 목록 검색 | `/mailFolders/...` |
-| `get_email_detail_view` | 💤주석 | 단일 메일의 상세 본문 텍스트 및 첨부파일 목록 조회 | `/messages/{id}` |
+| `get_recent_emails` | ✅활성화 | 최근 수신된 이메일 목록 대략 조회 | `/messages` |
+| `get_unread_emails` | ✅활성화 | 읽지 않은(`isRead=false`) 메일 조회 | `/messages` |
+| `get_important_or_flagged_emails` | ✅활성화 | 중요함(`high`) 또는 깃발(`flagged`) 표시된 메일 조회 | `/messages` |
+| `search_emails_by_keyword_advanced` | ✅활성화 | 이메일 제목 또는 본문에서 특정 키워드 풀텍스트 검색 | `/messages` |
+| `search_emails_by_sender_advanced` | ✅활성화 | 발신자 메일/이름 기준으로 필터링 검색 | `/messages` |
+| `search_emails_by_attachment` | ✅활성화 | 첨부파일 존재 여부 및 파일명/확장자별 필터 탐색 | `/messages` |
+| `get_sent_emails` | ✅활성화 | 본인이 발송한 보낸 편지함(`sentitems`) 목록 검색 | `/mailFolders/...` |
+| `get_email_detail_view` | ✅활성화 | 단일 메일의 상세 본문 텍스트 및 첨부파일 목록 조회 | `/messages/{id}` |
+
+### 3) Teams 도구 (`teams_tools.py`)
+| 도구명 | 상태 | 설명 | 연동 API |
+| :-- | :--: | :-- | :-- |
+| `list_my_chats` | ✅활성화 | 사용자가 참여 중인 최근 채팅방 목록을 조회합니다. | `/chats` |
+| `get_chat_messages` | ✅활성화 | 특정 채팅방(`chat_id`)의 최근 메시지 내역을 조회합니다. | `/chats/{id}/messages` |
+| `send_chat_message` | ✅활성화 | 특정 채팅방에 텍스트 또는 HTML 메시지를 전송합니다. | `POST /chats/{id}/messages` |
+
+### 4) SharePoint / OneDrive 도구 (`sharepoint_tools.py`)
+| 도구명 | 상태 | 설명 | 연동 API |
+| :-- | :--: | :-- | :-- |
+| `list_drive_files` | ✅활성화 | 내 드라이브(루트 또는 특정 폴더)의 파일/폴더 목록을 조회합니다. | `/drive/.../children` |
+| `search_drive_files` | ✅활성화 | 내 드라이브 전체에서 파일명 등 키워드를 기반으로 검색합니다. | `/drive/root/search` |
+| `get_drive_file_info` | ✅활성화 | 파일의 다운로드 링크(`downloadUrl`) 및 브라우저 열람 링크를 조회합니다. | `/drive/items/{id}` |
 
 ## 실행 및 검증 방법
 ### 로컬 개발
