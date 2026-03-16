@@ -93,12 +93,12 @@ async def graph_request(
     
 
     token = await get_access_token(company_cd)
-    email = user_email or DEFAULT_USER_EMAIL
+    # email = user_email or DEFAULT_USER_EMAIL
 
-    if not email:
+    if not user_email:
         raise ValueError("user_email is required or default_user_email must be configured")
 
-    url = f"{GRAPH_BASE}/users/{email}{path}"
+    url = f"{GRAPH_BASE}/users/{user_email}{path}"
     headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
     if custom_headers:
         headers.update(custom_headers)

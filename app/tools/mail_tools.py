@@ -70,16 +70,18 @@ def register_mail_tools(mcp: FastMCP):
             current_user = _get_request_current_user()
 
             if not current_user:
-                raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
-            
-            query_email = current_user.email or "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
-            query_company_cd = current_user.company_cd or "leodev901"  #DEFAULT_COMPANY_CD
+                # raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
+                query_email = "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
+                query_company_cd = "leodev901"  #DEFAULT_COMPANY_CD 
+            else: 
+                query_email = current_user.email or "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
+                query_company_cd = current_user.company_cd or "leodev901"  #DEFAULT_COMPANY_CD
 
             if _is_black_list(query_email):
                 raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
             
             path = (
-                f"/messages"
+                f"/mailFolders/inbox/messages"
                 f"?$top={tok_k}"
                 f"&$select=id,subject,sender,receivedDateTime"
                 f"&$orderby=receivedDateTime desc"
@@ -142,16 +144,19 @@ def register_mail_tools(mcp: FastMCP):
         try:
             current_user = _get_request_current_user()
             if not current_user:
-                raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
+                # raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
+                query_email = "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
+                query_company_cd = "leodev901"  #DEFAULT_COMPANY_CD 
+            else: 
+                query_email = current_user.email or "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
+                query_company_cd = current_user.company_cd or "leodev901"  #DEFAULT_COMPANY_CD
             
-            query_email = current_user.email or "admin@leodev901.onmicrosoft.com"
-            query_company_cd = current_user.company_cd or "leodev901"
 
             if _is_black_list(query_email):
                 raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
 
             path = (
-                f"/messages"
+                f"/mailFolders/inbox/messages"
                 f"?$top={tok_k}"
                 f"&$select=id,subject,sender,receivedDateTime,isRead"
                 f"&$orderby=receivedDateTime desc"
@@ -220,16 +225,18 @@ def register_mail_tools(mcp: FastMCP):
         try:
             current_user = _get_request_current_user()
             if not current_user:
-                raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
-            
-            query_email = current_user.email or "admin@leodev901.onmicrosoft.com"
-            query_company_cd = current_user.company_cd or "leodev901"
+                # raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
+                query_email = "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
+                query_company_cd = "leodev901"  #DEFAULT_COMPANY_CD 
+            else: 
+                query_email = current_user.email or "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
+                query_company_cd = current_user.company_cd or "leodev901"  #DEFAULT_COMPANY_CD
 
             if _is_black_list(query_email):
                 raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
 
             path = (
-                f"/messages"
+                f"/mailFolders/inbox/messages"
                 f"?$top={tok_k}"
                 f"&$select=id,subject,sender,receivedDateTime,importance,flag"
                 f"&$orderby=receivedDateTime desc"
@@ -311,10 +318,12 @@ def register_mail_tools(mcp: FastMCP):
 
             current_user = _get_request_current_user()
             if not current_user:
-                raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
-            
-            query_email = current_user.email or "admin@leodev901.onmicrosoft.com"
-            query_company_cd = current_user.company_cd or "leodev901"
+                # raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
+                query_email = "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
+                query_company_cd = "leodev901"  #DEFAULT_COMPANY_CD 
+            else: 
+                query_email = current_user.email or "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
+                query_company_cd = current_user.company_cd or "leodev901"  #DEFAULT_COMPANY_CD
 
             if _is_black_list(query_email):
                 raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
@@ -397,10 +406,12 @@ def register_mail_tools(mcp: FastMCP):
 
             current_user = _get_request_current_user()
             if not current_user:
-                raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
-            
-            query_email = current_user.email or "admin@leodev901.onmicrosoft.com"
-            query_company_cd = current_user.company_cd or "leodev901"
+                # raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
+                query_email = "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
+                query_company_cd = "leodev901"  #DEFAULT_COMPANY_CD 
+            else: 
+                query_email = current_user.email or "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
+                query_company_cd = current_user.company_cd or "leodev901"  #DEFAULT_COMPANY_CD
 
             if _is_black_list(query_email):
                 raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
@@ -501,10 +512,12 @@ def register_mail_tools(mcp: FastMCP):
         try:
             current_user = _get_request_current_user()
             if not current_user:
-                raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
-            
-            query_email = current_user.email or "admin@leodev901.onmicrosoft.com"
-            query_company_cd = current_user.company_cd or "leodev901"
+                # raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
+                query_email = "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
+                query_company_cd = "leodev901"  #DEFAULT_COMPANY_CD 
+            else: 
+                query_email = current_user.email or "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
+                query_company_cd = current_user.company_cd or "leodev901"  #DEFAULT_COMPANY_CD
 
             if _is_black_list(query_email):
                 raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
@@ -595,10 +608,12 @@ def register_mail_tools(mcp: FastMCP):
         try:
             current_user = _get_request_current_user()
             if not current_user:
-                raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
-            
-            query_email = current_user.email or "admin@leodev901.onmicrosoft.com"
-            query_company_cd = current_user.company_cd or "leodev901"
+                # raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
+                query_email = "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
+                query_company_cd = "leodev901"  #DEFAULT_COMPANY_CD 
+            else: 
+                query_email = current_user.email or "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
+                query_company_cd = current_user.company_cd or "leodev901"  #DEFAULT_COMPANY_CD
 
             if _is_black_list(query_email):
                 raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
@@ -669,10 +684,13 @@ def register_mail_tools(mcp: FastMCP):
 
             current_user = _get_request_current_user()
             if not current_user:
-                raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
-            
-            query_email = current_user.email or "admin@leodev901.onmicrosoft.com"
-            query_company_cd = current_user.company_cd or "leodev901"
+                # raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
+                query_email = "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
+                query_company_cd = "leodev901"  #DEFAULT_COMPANY_CD 
+            else: 
+                query_email = current_user.email or "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
+                query_company_cd = current_user.company_cd or "leodev901"  #DEFAULT_COMPANY_CD
+
 
             if _is_black_list(query_email):
                 raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
