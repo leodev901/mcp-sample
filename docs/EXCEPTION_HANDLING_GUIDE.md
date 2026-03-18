@@ -15,8 +15,10 @@
 6. [에러 처리 모듈화: 헬퍼 vs 데코레이터](#6-에러-처리-모듈화-헬퍼-vs-데코레이터)
 7. [반환 타입이 혼재할 때의 대응](#7-반환-타입이-혼재할-때의-대응)
 8. [전략 선택 기준 요약](#8-전략-선택-기준-요약)
-9. [실패 예시 & 해결 방법](#9-실패-예시--해결-방법)
-10. [학습 포인트 체크리스트](#10-학습-포인트-체크리스트)
+9. [HTTP 상태 코드별 커스텀 예외 변환 패턴](#9-http-상태-코드별-커스텀-예외-변환-패턴)
+10. [message vs error 필드 분리 패턴](#10-message-vs-error-필드-분리-패턴)
+11. [실패 예시 & 해결 방법](#11-실패-예시--해결-방법)
+12. [학습 포인트 체크리스트](#12-학습-포인트-체크리스트)
 
 ---
 
@@ -577,7 +579,151 @@ async def delete_*(): ...
 
 ---
 
-## 9. 실패 예시 & 해결 방법
+## 9. HTTP 상태 코드별 커스텀 예외 변환 패턴
+
+외부 API(`httpx` 등)를 호출할 때 `4xx/5xx` 응답이 오면, 상태 코드만으로는 "왜 실패했는지" 의미를 알기 어렵습니다.  
+`httpx.HTTPStatusError`를 잡아서 **의미 있는 커스텀 예외로 변환하는 패턴**을 사용하면, 호출 레이어에서 에러 분기가 명확해집니다.
+
+```python
+# app/clients/api_client.py
+import httpx
+
+try:
+    resp = await client.request(method, url, headers=headers, json=body)
+    resp.raise_for_status()  # 4xx/5xx 응답 시 httpx.HTTPStatusError 발생
+    return resp.json()
+
+except httpx.HTTPStatusError as e:
+    # [문법 포인트] httpx.HTTPStatusError는 httpx 라이브러리 자체 예외이므로
+    # import 없이 `httpx.HTTPStatusError`로 직접 참조한다.
+    # 별도 from httpx import HTTPStatusError 없이 사용 가능.
+    status_code = e.response.status_code
+    error_detail = f"{type(e).__name__}: {e}"
+
+    # 상태 코드 → 커스텀 예외 변환
+    if status_code == 400:
+        raise ApiBadRequestError(error_detail)       # LLM에게 반환 가능
+    elif status_code == 401:
+        raise ApiUnauthorizedError(error_detail)     # 시스템 에러 (인프라 문제)
+    elif status_code == 403:
+        raise ApiForbiddenError(error_detail)        # 시스템 에러 (권한 문제)
+    elif status_code == 404:
+        raise ApiNotFoundError(error_detail)         # LLM에게 반환 가능
+    raise e  # 위에서 처리 못한 나머지 HTTP 에러는 원본 그대로 throw
+
+except Exception as e:
+    # httpx.HTTPStatusError가 아닌 네트워크 오류, 타임아웃 등
+    raise e
+```
+
+**왜 이렇게 하나?**  
+`httpx.HTTPStatusError`는 단순히 "HTTP 응답이 4xx/5xx"라는 사실만 알려주지만,  
+커스텀 예외로 바꾸면 호출 측에서 `except ApiNotFoundError`처럼 **의미 단위로 분기**할 수 있게 됩니다.
+
+**설정 누락(ConfigError) 특이 케이스**:
+
+```python
+# 외부 API가 아닌, 서버 내부 설정이 누락된 경우도 같은 패턴으로 커스텀 예외화
+class ApiConfigError(ApiClientError):
+    """API 클라이언트 설정값(키, 시크릿 등)이 누락됐을 때 발생.
+    이 에러는 개발자 또는 운영자가 .env를 수정해야 해결 가능하며,
+    LLM 에이전트가 파라미터를 바꿔도 해결이 안 된다.
+    따라서 데코레이터에서 잡히더라도 '관리자에게 문의하세요' 수준의 메시지로 전달된다.
+    """
+    def __init__(self, service_name: str):
+        super().__init__(
+            code="CONFIG_NOT_FOUND",
+            message=f"{service_name} 설정이 없습니다. 관리자에게 문의하세요."
+        )
+
+# get_access_token() 내부에서:
+if not client_id or not client_secret:
+    raise ApiConfigError("PaymentGateway")  # ValueError 대신 커스텀 에러
+```
+
+> **설계 포인트**: `ApiConfigError`는 LLM이 받아봤자 파라미터를 바꿔서 해결할 수 없는 에러입니다.  
+> 하지만 공통 부모(`ApiClientError`)로 관리하면 **데코레이터 한 곳에서 일관된 응답 구조**를 만들 수 있습니다.  
+> "관리자에게 문의하세요" 라는 `message`가 LLM을 통해 사용자에게 전달되는 것 자체는 유효한 UX입니다.
+
+---
+
+## 10. message vs error 필드 분리 패턴
+
+커스텀 예외에 `message` 필드 하나만 있을 때의 문제:
+
+```python
+# ❌ message 하나만 있으면:
+class ApiBadRequestError(ApiClientError):
+    def __init__(self, raw_error: str):
+        super().__init__(code="BAD_REQUEST", message=f"잘못된 요청입니다. {raw_error}")
+        # ↑ raw_error (기술적 상세 정보)가 message에 그대로 섞여버림
+        # LLM에게도, 로그에도 너무 많은 정보가 노출됨
+```
+
+**해결: `message`와 `error`를 분리**
+
+```python
+class ApiClientError(Exception):
+    def __init__(self, code: str, message: str, error: str = ""):
+        super().__init__(message)
+        self.code = code
+        self.message = message   # ← LLM/사용자에게 보여줄 "친화적 설명"
+        self.error = error       # ← 개발자를 위한 "기술적 원인" (선택, 기본값 "")
+
+
+class ApiBadRequestError(ApiClientError):
+    def __init__(self, raw_error: str):            # raw_error: httpx가 준 원본 에러 메시지
+        super().__init__(
+            code="BAD_REQUEST",
+            message="잘못된 요청입니다. 파라미터를 확인해주세요.",  # ← 사람/LLM 용
+            error=raw_error                                      # ← 로그/디버그 용
+        )
+
+class ApiNotFoundError(ApiClientError):
+    def __init__(self, raw_error: str):
+        super().__init__(
+            code="NOT_FOUND",
+            message="요청한 리소스를 찾을 수 없습니다. 이메일 또는 ID를 확인해주세요.",
+            error=raw_error
+        )
+```
+
+**데코레이터에서 응답에 두 필드 모두 포함**:
+
+```python
+# app/common/error_handler.py
+except ApiClientError as e:
+    logger.warning(f"[LLM 반환 에러] {func.__name__} - {e.code}:{e.message}")
+    rtn_dict = {
+        "status": "error",
+        "code": e.code,
+        "message": e.message,    # LLM이 읽고 사용자에게 전달하는 메시지
+        "error": e.error         # 로그 분석 및 디버깅용 원본 에러 (비어있을 수 있음)
+    }
+    return [rtn_dict] if as_list else rtn_dict
+```
+
+**실제 LLM 에이전트가 받는 결과 예시**:
+
+```json
+[
+  {
+    "status": "error",
+    "code": "NOT_FOUND",
+    "message": "요청한 리소스를 찾을 수 없습니다. 이메일 또는 ID를 확인해주세요.",
+    "error": "HTTPStatusError: Client error '404 Not Found' ..."
+  }
+]
+```
+
+| 필드 | 대상 | 내용 성격 |
+|---|---|---|
+| `message` | LLM 에이전트, 사용자 | 짧고 명확한 한국어 설명 |
+| `error` | 개발자, 로그 분석 | httpx 원본 에러 메시지, 스택 힌트 등 |
+
+---
+
+## 11. 실패 예시 & 해결 방법
 
 ### 실패 1: import 누락으로 NameError 발생
 
@@ -637,9 +783,23 @@ except Exception as e:
     trace_id = "unknown"
 ```
 
+### 실패 5: `httpx.HTTPStatusError` 대신 `HTTPStatusError`만 쓰면 `NameError`
+
+```python
+# ❌ 실패 코드
+except HTTPStatusError as e:        # NameError: name 'HTTPStatusError' is not defined
+    status_code = e.response.status_code
+
+# ✅ 해결: httpx 패키지를 앞에 붙여서 직접 참조
+except httpx.HTTPStatusError as e:  # httpx가 이미 import 되어 있으므로 별도 import 불필요
+    status_code = e.response.status_code
+
+# 또는 from httpx import HTTPStatusError 로 명시적으로 import 후 사용
+```
+
 ---
 
-## 10. 학습 포인트 체크리스트
+## 12. 학습 포인트 체크리스트
 
 - [ ] `Exception`을 상속한 커스텀 예외 클래스를 만들 수 있다
 - [ ] `super().__init__(message)`가 왜 필요한지 설명할 수 있다
@@ -651,6 +811,9 @@ except Exception as e:
 - [ ] 비즈니스 에러 vs 시스템 에러를 구분하고 처리 방식을 다르게 적용할 수 있다
 - [ ] YAGNI 원칙을 설계에 적용할 수 있다
 - [ ] 빈 `except:` 대신 `except Exception as e:`를 쓰는 이유를 설명할 수 있다
+- [ ] `httpx.HTTPStatusError`를 상태 코드별 커스텀 예외로 변환하는 패턴을 구현할 수 있다
+- [ ] `message`(사용자 대상)와 `error`(개발자 대상) 필드를 분리하는 이유를 설명할 수 있다
+- [ ] 설정 누락(ConfigError) 에러를 `ValueError` 대신 커스텀 예외로 처리하는 이유를 설명할 수 있다
 
 ---
 
