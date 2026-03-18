@@ -5,9 +5,13 @@ from loguru import logger
 from typing import Annotated,Optional
 from datetime import datetime
 
-from app.clients.graph_client import graph_request
+from app.clients.graph_client import graph_request, GraphAccessDeniedError
+from app.common.graph_error_wrapper import graph_error_wrapper
 from app.models.user_info import UserInfo
+from app.core.config import settings
 
+DEFAULT_USER_EMAIL = settings.DEFAULT_USER_EMAIL
+DEFAULT_COMPANY_CD = settings.DEFAULT_COMPANY_CD
 
 current_time = datetime.now().isoformat(timespec="seconds")
 
@@ -18,14 +22,11 @@ BLACKLIST = [
 
 def register_calendar_tools(mcp: FastMCP):
 
-    def _is_black_list(email: str) -> bool:
-        return email in BLACKLIST
-
     def _get_request_current_user() -> UserInfo | None:
         # Tool 이 HTTP 요청 바깥에서도 호출될 수 있어, 요청이 없으면 None 으로 둔다.
         try:
             request = get_http_request()
-        except RuntimeError:
+        except RuntimeError as e:
             logger.error(f"현재 사용자 정보를 가져오는 중 오류 발생: {str(e)}")
             return None
 
@@ -35,7 +36,7 @@ def register_calendar_tools(mcp: FastMCP):
         # Tool 이 HTTP 요청 바깥에서도 호출될 수 있어, 요청이 없으면 None 으로 둔다.
         try:
             request = get_http_request()
-        except RuntimeError:
+        except RuntimeError as e:
             logger.error(f"현재 사용자 정보를 가져오는 중 오류 발생: {str(e)}")
             return None
 
@@ -92,13 +93,62 @@ def register_calendar_tools(mcp: FastMCP):
     async def check_company_token(company_cd:str ):
         raise NotImplementedError()
 
+    @mcp.tool()
+    async def search_email_by_name(
+        search_name: Annotated[str,"검색 대상자 이름"]
+    )->list[dict]:
+        """
+        M365의 사용자 이름을 기반으로 사용자 정보 이메일을 검색합니다.
+        이 도구는 다른 도구를 호출 할 때 이메일주소가 아닌 사람 이름으로 요청이 올 경우 사용합니다.
+        먼저 사람 이름으로 사용자 이메일 정보를 확인하여 반환된 값으로, 이어서 다른 도구를 호출 할 때 이메일 주소를 사용합니다.
+
+        [LLM 에이전트 가이드]
+        1. 사용자가 다른 일정 도구릃 호출 할 때, 이메일주소가 아닌 사람 이름으로 요청하면, 우선 이 도구를 사용하여 M365의 사용자 이메일 정보를 조회합니다.
+        2. 만약 검색 결과가 여러명일 경우, 사용자에게 이메일 주소를 다시 확인 요청합니다.
+        3. 이메일을 조회하기 위해서는 사용자로부터 '이름' 정보를 필수로 받아야 합니다.
+
+        Args:
+            search_name (str): 검색 대상자 이름
+
+        Returns:
+            list[dict]: 사용자 정보 목록
+        """
+
+        current_user = _get_request_current_user()
+        
+        # 1순위 토큰 사용자 정보  
+        # 2순위 Default 값
+        if current_user is not None:
+            query_email = current_user.email
+            query_company_cd = current_user.company_cd
+        else:
+            query_email = DEFAULT_USER_EMAIL
+            query_company_cd = DEFAULT_COMPANY_CD
+
+        path = f"/users?$filter=displayName eq '{search_name}'"
+
+        resp = await graph_request(
+            method="GET",
+            path=path,
+            user_email=query_email,
+            company_cd=query_company_cd,
+            is_replace_path=True
+        )
+
+        users = resp.get("value",[])
+        if users == []:
+            return [{"message":"검색 결과가 없습니다."}]
+        
+        return [ {"name":user.get("displayName"),"email":user.get("mail")} for user in users]
+
 
     @mcp.tool()
+    @graph_error_wrapper(as_list=True)
     async def list_calendar_events(
         start_date: Annotated[str,"조회 시작일 (ISO 8601, 예: 2026-03-01T00:00:00)"]="2026-03-01T00:00:00",
         end_date: Annotated[str,"조회 종료일 (ISO 8601, 예: 2026-03-31T23:59:59)"]="2026-03-31T23:59:59",
         top: Annotated[Optional[int],"최대 조회 건수 (기본 10)"]=10,
-        user_email: Annotated[Optional[str],"조회 대상자의 이메일주소 입니다. 예: sample@microsoft.com"]="admin@leodev901.onmicrosoft.com",
+        user_email: Annotated[Optional[str],"조회 대상자의 이메일주소 입니다. 반드시 '이메일 형식'이어야 합니다. 예: sample@microsoft.com"]="admin@leodev901.onmicrosoft.com",
     ) -> list[dict]:
         """MS365 Outllok 캘린더 일정을 조회합니다.
 
@@ -110,7 +160,7 @@ def register_calendar_tools(mcp: FastMCP):
                 start_date (str, Required): 조회 시작일 (ISO 8601, 예: 2026-03-01T00:00:00)
                 end_date (str, Required): 조회 종료일 (ISO 8601, 예: 2026-03-31T23:59:59)
                 top (int, Optional): 최대 조회 건수 (기본 10)
-                user_email (str, Optional): 조회 대상자의 이메일주소 입니다. 예: sample@microsoft.com
+                user_email (str, Optional): 조회 대상자의 이메일주소 입니다. 반드시 '이메일 형식'이어야 합니다. 예: sample@microsoft.com
 
             Returns:
                 list[dict]: 일정 목록 정보를 반환합니다.          
@@ -120,10 +170,10 @@ def register_calendar_tools(mcp: FastMCP):
         current_user = _get_request_current_user()
         
         logger.info("현재 trace_id: {}", trace_id)
-        if not current_user:
-            raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
-        logger.info("현재 사용자 정보를 가져왔습니다. 사용자: {}", current_user)
-        logger.info("현재 사용자 이메일: {}", current_user.email)
+        # if not current_user:
+        #      raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
+        # logger.info("현재 사용자 정보를 가져왔습니다. 사용자: {}", current_user)
+        # logger.info("현재 사용자 이메일: {}", current_user.email)
 
         
         # 사용자 정보와 요청 이메일이 다른경우
@@ -132,14 +182,19 @@ def register_calendar_tools(mcp: FastMCP):
                 logger.info("요청자가 다른 사용자의 이메일을 조회하였습니다. 요청자: {}, 조회자: {}", current_user.email, user_email)
                 # 계속 진행 pass
 
-        # 우선순위 1. mcp_call 파라미터 -> 2. 토큰 사용자 정보 -> 3. Default 값
-        query_email = user_email or ( current_user.email if current_user else None ) or "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
-        # 우선순위 1. 토큰 사용자 정보 -> 2. Default 값
-        query_company_cd = ( current_user.company_cd if current_user else None ) or "leodev901"  #DEFAULT_COMPANY_CD
+        # 1순위 파라미터 
+        # 2순위 토큰 사용자 정보 
+        # 3순위 Default 값
+        if user_email is not None:
+            query_email = user_email
+            query_company_cd = DEFAULT_COMPANY_CD
+        elif current_user is not None:
+            query_email = current_user.email
+            query_company_cd = current_user.company_cd
+        else:
+            query_email = DEFAULT_USER_EMAIL
+            query_company_cd = DEFAULT_COMPANY_CD
         
-        if _is_black_list(query_email):
-             raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
-
         path=(
             f"/calendarView"
             f"?startDateTime={start_date}"
@@ -161,22 +216,37 @@ def register_calendar_tools(mcp: FastMCP):
     @mcp.tool()
     async def get_calendar_event(
         event_id: Annotated[str, "조회할 일정의 고유 ID (필수)"],
-        user_email: Annotated[Optional[str], "조회 대상자의 이메일 주소 (예: sample@microsoft.com)"] = "admin@leodev901.onmicrosoft.com",
+        user_email: Annotated[Optional[str], "조회 대상자의 이메일 주소 입니다. 반드시 '이메일 형식'이어야 합니다. 예: sample@microsoft.com"] = "admin@leodev901.onmicrosoft.com",
     ) -> dict:
         """단일 캘린더 일정의 상세 정보를 조회합니다.
         
         [LLM 에이전트 가이드]
         1. 목록 조회 후 특정 일정의 구체적인 내용을 확인할 때 사용합니다.
+        
+        Args: 
+            event_id (str, Required): 조회할 일정의 고유 ID (필수)
+            user_email (str, Optional): 조회 대상자의 이메일 주소 입니다. 반드시 '이메일 형식'이어야 합니다. 예: sample@microsoft.com
+
+        Returns:
+            dict: 일정 상세 정보를 반환합니다.          
         """
         current_user = _get_request_current_user()
-        if not current_user:
-            raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
+        # if not current_user:
+        #     raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
             
-        query_email = user_email or current_user.email or "admin@leodev901.onmicrosoft.com"
-        query_company_cd = current_user.company_cd or "leodev901"
+        # 1순위 파라미터 
+        # 2순위 토큰 사용자 정보 
+        # 3순위 Default 값
+        if user_email is not None:
+            query_email = user_email
+            query_company_cd = DEFAULT_COMPANY_CD
+        elif current_user is not None:
+            query_email = current_user.email
+            query_company_cd = current_user.company_cd
+        else:
+            query_email = DEFAULT_USER_EMAIL
+            query_company_cd = DEFAULT_COMPANY_CD
         
-        if _is_black_list(query_email):
-             raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
 
         path = f"/events/{event_id}"
         
@@ -208,16 +278,36 @@ def register_calendar_tools(mcp: FastMCP):
         [LLM 에이전트 가이드]
         1. 사용자가 "내일 10시에 회의 일정 잡아줘" 등의 요청 시 사용합니다.
         2. start_date와 end_date는 한국 시간(KST) 기준으로 작성해야 합니다.
+        
+        Args: 
+            subject (str, Required): 일정 제목 (필수)
+            start_date (str, Required): 일정 시작 일시 (ISO 8601, KST 기준, 예: 2026-03-01T10:00:00)
+            end_date (str, Required): 일정 종료 일시 (ISO 8601, KST 기준, 예: 2026-03-01T11:00:00)
+            user_email (str, Optional): 생성 대상자의 이메일 주소 입니다. 반드시 '이메일 형식'이어야 합니다. 예: sample@microsoft.com
+            body (str, Optional): 일정 상세 내용 (HTML 또는 일반 텍스트)
+            location (str, Optional): 일정 장소 이름
+            attendees (list[str], Optional): 참석자 이메일 주소 목록 (예: ['user1@com', 'user2@com'])
+            is_online_meeting (bool, Optional): Teams 온라인 회의 생성 여부
+
+        Returns:
+            dict: 일정 생성 정보를 반환합니다.          
         """
         current_user = _get_request_current_user()
-        if not current_user:
-            raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
+        # if not current_user:
+        #     raise ValueError("현재 사용자 정보를 찾을 수 없습니다. 토큰 정보를 확인해주세요.")
             
-        query_email = user_email or current_user.email or "admin@leodev901.onmicrosoft.com"
-        query_company_cd = current_user.company_cd or "leodev901"
-        
-        if _is_black_list(query_email):
-             raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
+        # 1순위 파라미터 
+        # 2순위 토큰 사용자 정보 
+        # 3순위 Default 값
+        if user_email is not None:
+            query_email = user_email
+            query_company_cd = DEFAULT_COMPANY_CD
+        elif current_user is not None:
+            query_email = current_user.email
+            query_company_cd = current_user.company_cd
+        else:
+            query_email = DEFAULT_USER_EMAIL
+            query_company_cd = DEFAULT_COMPANY_CD
 
         payload = {
             "subject": subject,
@@ -268,16 +358,38 @@ def register_calendar_tools(mcp: FastMCP):
         [LLM 에이전트 가이드]
         1. 사용자가 기존 일정의 시간, 장소, 제목 등을 변경해달라고 할 때 사용합니다.
         2. 변경하려는 파라미터만 값을 채워 넣으면 됩니다.
+
+        Args:
+            event_id (str, Required): 수정할 일정의 고유 ID (필수)
+            user_email (str, Optional): 조회 대상자의 이메일 주소 입니다. 반드시 '이메일 형식'이어야 합니다. 예: sample@microsoft.com
+            subject (str, Optional): 변경할 일정 제목
+            start_date (str, Optional): 변경할 시작 일시 (KST)
+            end_date (str, Optional): 변경할 종료 일시 (KST)
+            body (str, Optional): 변경할 상세 내용
+            location (str, Optional): 변경할 장소
+            attendees (list[str], Optional): 변경할 참석자 이메일 목록
+            is_online_meeting (bool, Optional): 온라인 회의 설정 여부
+
+        Returns:
+            dict: 일정 수정 정보를 반환합니다.          
         """
         current_user = _get_request_current_user()
-        if not current_user:
-            raise ValueError("현재 사용자 정보를 찾을 수 없습니다.")
+        # if not current_user:
+        #     raise ValueError("현재 사용자 정보를 찾을 수 없습니다.")
             
-        query_email = user_email or current_user.email or "admin@leodev901.onmicrosoft.com"
-        query_company_cd = current_user.company_cd or "leodev901"
-        
-        if _is_black_list(query_email):
-             raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
+        # 1순위 파라미터 
+        # 2순위 토큰 사용자 정보 
+        # 3순위 Default 값
+        if user_email is not None:
+            query_email = user_email
+            query_company_cd = DEFAULT_COMPANY_CD
+        elif current_user is not None:
+            query_email = current_user.email
+            query_company_cd = current_user.company_cd
+        else:
+            query_email = DEFAULT_USER_EMAIL
+            query_company_cd = DEFAULT_COMPANY_CD
+
 
         payload = {}
         if subject is not None:
@@ -325,16 +437,30 @@ def register_calendar_tools(mcp: FastMCP):
         
         [LLM 에이전트 가이드]
         1. 사용자가 특정 일정을 취소/삭제해달라고 할 때 사용합니다.
+
+        Args:
+            event_id (str, Required): 삭제할 일정의 고유 ID (필수)
+            user_email (str, Optional): 조회 대상자의 이메일 주소 입니다. 반드시 '이메일 형식'이어야 합니다. 예: sample@microsoft.com
+
+        Returns:
+            dict: 일정 삭제 정보를 반환합니다.          
         """
         current_user = _get_request_current_user()
-        if not current_user:
-            raise ValueError("현재 사용자 정보를 찾을 수 없습니다.")
+        # if not current_user:
+        #     raise ValueError("현재 사용자 정보를 찾을 수 없습니다.")
             
-        query_email = user_email or current_user.email or "admin@leodev901.onmicrosoft.com"
-        query_company_cd = current_user.company_cd or "leodev901"
-        
-        if _is_black_list(query_email):
-             raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
+        # 1순위 파라미터 
+        # 2순위 토큰 사용자 정보 
+        # 3순위 Default 값
+        if user_email is not None:
+            query_email = user_email
+            query_company_cd = DEFAULT_COMPANY_CD
+        elif current_user is not None:
+            query_email = current_user.email
+            query_company_cd = current_user.company_cd
+        else:
+            query_email = DEFAULT_USER_EMAIL
+            query_company_cd = DEFAULT_COMPANY_CD
 
         try:
             await graph_request(

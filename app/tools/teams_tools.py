@@ -6,14 +6,7 @@ from app.clients.graph_client import graph_request
 from fastmcp.server.dependencies import get_http_request
 from app.models.user_info import UserInfo
 
-BLACKLIST = [
-    "admin@skcc.com",
-]
-
 def register_teams_tools(mcp: FastMCP):
-
-    def _is_black_list(email: str) -> bool:
-        return email in BLACKLIST
 
     def _get_request_current_user() -> UserInfo | None:
         try:
@@ -35,15 +28,22 @@ def register_teams_tools(mcp: FastMCP):
         2. 반환되는 `id` (chat_id)는 향후 특정 채팅방의 메시지를 조회하거나 메시지를 보낼 때 사용되는 **필수 식별자**입니다.
         """
         current_user = _get_request_current_user()
-        if not current_user:
-            raise ValueError("현재 사용자 정보를 찾을 수 없습니다.")
+        # if not current_user:
+            # raise ValueError("현재 사용자 정보를 찾을 수 없습니다.")
             
-        query_email = user_email or current_user.email or "admin@leodev901.onmicrosoft.com"
-        query_company_cd = current_user.company_cd or "leodev901"
+        # 1순위: user_email 파라미터
+        # 2순위: current_user
+        # 3순위: 기본값
+        if user_email is not None:
+            query_email = user_email
+            query_company_cd = "leodev901"
+        elif current_user:
+            query_email = current_user.email
+            query_company_cd = current_user.company_cd
+        else:
+            query_email = "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
+            query_company_cd = "leodev901" #DEFAULT_COMPANY_CD
         
-        if _is_black_list(query_email):
-             raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
-
         path = f"/chats?$top={tok_k}&$expand=lastMessagePreview"
         
         try:
@@ -88,14 +88,22 @@ def register_teams_tools(mcp: FastMCP):
         2. 최신순(내림차순)으로 반환됩니다.
         """
         current_user = _get_request_current_user()
-        if not current_user:
-            raise ValueError("현재 사용자 정보를 찾을 수 없습니다.")
+        # if not current_user:
+            # raise ValueError("현재 사용자 정보를 찾을 수 없습니다.")
             
-        query_email = user_email or current_user.email or "admin@leodev901.onmicrosoft.com"
-        query_company_cd = current_user.company_cd or "leodev901"
+        # 1순위: user_email 파라미터
+        # 2순위: current_user
+        # 3순위: 기본값
+        if user_email is not None:
+            query_email = user_email
+            query_company_cd = "leodev901"
+        elif current_user:
+            query_email = current_user.email
+            query_company_cd = current_user.company_cd
+        else:
+            query_email = "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
+            query_company_cd = "leodev901" #DEFAULT_COMPANY_CD
         
-        if _is_black_list(query_email):
-             raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
 
         path = f"/chats/{chat_id}/messages?$top={tok_k}&$orderby=createdDateTime desc"
         
@@ -139,14 +147,22 @@ def register_teams_tools(mcp: FastMCP):
         1. 사용자가 "마케팅팀 방에 이 문서 전달했다고 메시지 남겨줘"와 같이 메신저 발송을 요청할 때 사용합니다.
         """
         current_user = _get_request_current_user()
-        if not current_user:
-            raise ValueError("현재 사용자 정보를 찾을 수 없습니다.")
+        # if not current_user:
+            # raise ValueError("현재 사용자 정보를 찾을 수 없습니다.")
             
-        query_email = user_email or current_user.email or "admin@leodev901.onmicrosoft.com"
-        query_company_cd = current_user.company_cd or "leodev901"
+        # 1순위: user_email 파라미터
+        # 2순위: current_user
+        # 3순위: 기본값
+        if user_email is not None:
+            query_email = user_email
+            query_company_cd = "leodev901"
+        elif current_user:
+            query_email = current_user.email
+            query_company_cd = current_user.company_cd
+        else:
+            query_email = "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
+            query_company_cd = "leodev901" #DEFAULT_COMPANY_CD
         
-        if _is_black_list(query_email):
-             raise ValueError("해당 사용자는 접근이 허용되지 않습니다.")
 
         path = f"/chats/{chat_id}/messages"
         payload = {
