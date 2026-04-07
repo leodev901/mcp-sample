@@ -1,12 +1,16 @@
 import time
 from typing import Any
+from datetime import datetime
 
 from fastmcp.server.middleware.middleware import CallNext, Middleware, MiddlewareContext
 from loguru import logger
 from mcp.types import CallToolRequestParams
 from fastmcp.server.dependencies import get_http_request
 from app.security.jwt_auth import get_user_from_token
+from app.clients.mcp_client import save_mcp_tool_logs
 import json
+
+from app.models.logging import MCPToolLogRequest
 
 
 
@@ -95,6 +99,26 @@ class MCPLoggingMiddleware(Middleware):
                 input=input_json,
                 output=content_json,
             )
+
+            record = MCPToolLogRequest(
+                trace_id=trace_id,
+                tool_name=tool_name,
+                arguments=arguments,
+                elapsed_ms=elapsed_ms,
+                requestd_at=datetime.now(),
+            )
+            if current_user:
+                record.user_id = current_user.user_id
+                record.email = current_user.email
+                record.company_cd = current_user.company_cd
+            record.input = input_json
+            record.output = content_json
+            record.status = "success"   
+            record.responded_at = datetime.now()
+
+            awiat save_mcp_tool_logs(record.dict())
+
+
             return result
         except Exception as e: 
             elapsed_ms = (time.perf_counter() - started) * 1000.0
