@@ -1,329 +1,106 @@
-from app.clients.graph_client import graph_request
-from typing import Optional, Annotated
+from typing import Annotated, Optional
+
 from fastmcp import FastMCP
-from loguru import logger
-from app.models.user_info import UserInfo
-from fastmcp.server.dependencies import get_http_request
+
+from app.common.graph_error_wrapper import graph_error_wrapper
+from app.schemas.todo import TodoTask, TodoTaskList
+from app.services.todo_service import TodoService
+from app.tools.tool_context import get_request_current_user, resolve_graph_user
+
 
 def register_todo_tools(mcp: FastMCP):
-    
-    def _get_request_current_user() -> UserInfo | None:
-        try:
-            request = get_http_request()
-            return getattr(request.state, "current_user", None)
-        except RuntimeError:
-            return None
-    
+    todo_service = TodoService()
+
     @mcp.tool()
+    @graph_error_wrapper(as_list=True)
     async def todo_list_task_lists(
-        title: Annotated[Optional[str], "할 일 목록의 제목"] = None,
-        user_email: Annotated[Optional[str], "조회 대상자의 이메일 주소"] = None,  
-    ) -> list:
+        title: Annotated[Optional[str], "조회할 할 일 목록 이름입니다. 비우면 전체 목록을 조회합니다."] = None,
+        user_email: Annotated[Optional[str], "조회 대상자의 이메일 주소입니다. 예: user@example.com"] = None,
+    ) -> list[TodoTaskList]:
+        """Microsoft To Do의 할 일 목록을 조회합니다.
+
+        [LLM 에이전트 가이드]
+        1. 사용자가 할 일 목록이나 작업 목록 ID를 모를 때 먼저 사용합니다.
+        2. 반환된 id는 todo_list_tasks, todo_create_task에서 사용합니다.
         """
-        Microsoft Graph API를 사용하여 할 일 목록을 읽어옵니다.
-        이 툴은 할 일(task) 도구를 사용하기 위한 할 일 목록 ID를 찾는 용도로 사용됩니다.
-        사용 자가 특정 할 일(task)에 대한 작업을 요청할 때, 이 도구를 사용하여 해당 할 일의 목록 ID를 찾은 뒤, 반한 된 tas_list_id를 사용하여 할 일(task) 도구를 호출해야 합니다.
-
-        [LLM 에이전트 사용 가이드]
-        1. 사용자가 "할 일 확인해줘" 혹은 "오늘 할 일 보여줘" 할 일을 확인 할 때 호출하세요. 
-        2. 반환값은 딕셔너리(dict) 요소들로 구성된 형태의 리스트(list)입니다. 필요한 항목(제목, 마감일 등)을 가공하여 사용자에게 응답하세요.
-
-        Args:
-            - title (str): 할 일 목록의 제목 (기본값: None)
-            - user_email (str, optional): 조회 대상자의 이메일 주소 (기본값: None)
-
-        Returns:
-            list: 조건에 맞는 할 일 목록을 담고 있는 딕셔너리의 리스트입니다.
-        """
-        try:
-            current_user = _get_request_current_user()
-
-            # 1순위: user_email 파라미터
-            # 2순위: current_user
-            # 3순위: 기본값
-            if user_email is not None:
-                query_email = user_email
-                query_company_cd = "leodev901"
-            elif current_user:
-                query_email = current_user.email
-                query_company_cd = current_user.company_cd
-            else:
-                query_email = "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
-                query_company_cd = "leodev901" #DEFAULT_COMPANY_CD
-
-            path = f"/todo/lists"
-            if title is not None:
-                path += f"?$filter=title eq '{title}'"
-            
-            result = await graph_request(
-                method="GET",
-                path=path,
-                user_email=query_email,
-                company_cd=query_company_cd
-            )
-
-            task_lists = result.get("value", [])
-            if not task_lists:
-                return []
-            
-            return task_lists
-
-            # parsed_task_lists = []
-            # for task_list in task_lists:
-            #     parsed_task_lists.append({
-            #         "id": task_list.get("id"),
-            #         "title": task_list.get("title", "(제목 없음)"),
-            #         "due_date": task_list.get("dueDateTime"),
-            #         "status": task.get("status")
-            #     })
-
-            # return parsed_tasks
-
-        except Exception as e:
-            raise RuntimeError(f"할 일 조회 도중 오류 발생: {str(e)}")
-
-
-
+        current_user = get_request_current_user()
+        query_email, query_company_cd = resolve_graph_user(user_email, current_user)
+        return await todo_service.list_task_lists(title, query_email, query_company_cd)
 
     @mcp.tool()
+    @graph_error_wrapper(as_list=True)
     async def todo_list_tasks(
-        task_list_id: Annotated[str, "할 일 목록의 ID"],
-        user_email: Annotated[Optional[str], "조회 대상자의 이메일 주소"] = None,
-        top_k: Annotated[Optional[int], "최대 조회할 할 일 개수"] = 10,
-    ) -> list:
+        task_list_id: Annotated[str, "할 일 목록 ID입니다. todo_list_task_lists 반환값의 id를 사용합니다."],
+        top: Annotated[Optional[int], "최대 조회할 할 일 수입니다. 기본값은 10입니다."] = 10,
+        user_email: Annotated[Optional[str], "조회 대상자의 이메일 주소입니다. 예: user@example.com"] = None,
+    ) -> list[TodoTask]:
+        """특정 할 일 목록의 할 일들을 조회합니다.
+
+        [LLM 에이전트 가이드]
+        1. 사용자가 특정 목록 안의 할 일을 확인하고 싶어 할 때 사용합니다.
         """
-        Microsoft Graph API를 사용하여 특정 할 일 목록에 속한 할 일들을 읽어옵니다.
-
-
-        [LLM 에이전트 사용 가이드]
-        1. 사용자가 "할 일 확인해줘" 혹은 "오늘 할 일 보여줘" 할 일을 확인 할 때 호출하세요. 
-        2. 사용 자가 작업 목록 ID를 명시하지 않은 경우, todo_list_task_lists()를 호출하여 작업 목록 ID를 찾은 뒤, 반한 된 tas_list_id를 사용하여 todo_list_tasks()를 호출해야 합니다.
-        3. 반환값은 딕셔너리(dict) 요소들로 구성된 형태의 리스트(list)입니다. 필요한 항목(제목, 마감일 등)을 가공하여 사용자에게 응답하세요.
-
-        Args:
-            - task_list_id (str): 할 일 목록의 ID (기본값: None)
-            - user_email (str, optional): 조회 대상자의 이메일 주소 (기본값: None)
-            - top_k (int, optional): 최대 조회할 할 일 개수 (기본값: 10)
-
-        Returns:
-            list: 조건에 맞는 할 일 목록을 담고 있는 딕셔너리의 리스트입니다.
-        """
-        try:
-            current_user = _get_request_current_user()
-
-            # 1순위: user_email 파라미터
-            # 2순위: current_user
-            # 3순위: 기본값
-            if user_email is not None:
-                query_email = user_email
-                query_company_cd = "leodev901"
-            elif current_user:
-                query_email = current_user.email
-                query_company_cd = current_user.company_cd
-            else:
-                query_email = "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
-                query_company_cd = "leodev901" #DEFAULT_COMPANY_CD
-
-            path = (
-                f"/todo/lists/{task_list_id}/tasks"
-                f"?$top={top_k}&$count=true"
-                f"&$orderby=createdDateTime desc"
-            )
-            
-            result = await graph_request(
-                method="GET",
-                path=path,
-                user_email=query_email,
-                company_cd=query_company_cd
-            )
-
-            tasks = result.get("value", [])
-            if not tasks:
-                return []
-            
-            return tasks
-
-        except Exception as e:
-            raise RuntimeError(f"할 일 조회 도중 오류 발생: {str(e)}")
-
+        current_user = get_request_current_user()
+        query_email, query_company_cd = resolve_graph_user(user_email, current_user)
+        return await todo_service.list_tasks(task_list_id, top, query_email, query_company_cd)
 
     @mcp.tool()
+    @graph_error_wrapper(as_list=False)
     async def todo_create_task(
-        task_list_id: Annotated[str, "할 일 목록의 ID"],
-        title: Annotated[str, "할 일의 제목"],
-        user_email: Annotated[Optional[str], "할 일을 생성할 사용자의 이메일 주소"] = None,
-        due_date: Annotated[Optional[str], "할 일의 마감일 (YYYY-MM-DD 형식)"] = None,
-    ) -> dict:
+        task_list_id: Annotated[str, "할 일을 추가할 목록 ID입니다."],
+        title: Annotated[str, "새 할 일 제목입니다."],
+        user_email: Annotated[Optional[str], "할 일을 생성할 사용자 이메일 주소입니다. 예: user@example.com"] = None,
+        due_date: Annotated[Optional[str], "마감일입니다. YYYY-MM-DD 형식입니다."] = None,
+    ) -> TodoTask:
+        """새로운 할 일을 생성합니다.
+
+        [LLM 에이전트 가이드]
+        1. 사용자가 할 일을 추가해달라고 요청할 때 사용합니다.
         """
-        Microsoft Graph API를 사용하여 특정 할 일 목록에 새로운 할 일을 생성합니다.
-
-
-        [LLM 에이전트 사용 가이드]
-        1. 사용자가 "할 일 추가해줘" 혹은 "오늘 할 일 보여줘" 할 일을 확인 할 때 호출하세요. 
-        2. 사용 자가 작업 목록 ID를 명시하지 않은 경우, todo_list_task_lists()를 호출하여 작업 목록 ID를 찾은 뒤, 반한 된 tas_list_id를 사용하여 이 도구를 호출해야 합니다.
-        3. 반환값은 딕셔너리(dict) 요소들로 구성된 형태의 리스트(list)입니다. 필요한 항목(제목, 마감일 등)을 가공하여 사용자에게 응답하세요.
-
-        Args:
-            - task_list_id (str): 할 일 목록의 ID (기본값: None)
-            - title (str): 할 일의 제목 (기본값: None)
-            - user_email (str, optional): 할 일을 생성할 사용자의 이메일 주소 (기본값: None)
-            - due_date (str, optional): 할 일의 마감일 (YYYY-MM-DD 형식) (기본값: None)
-
-        Returns:
-            dict: 생성된 할 일 정보를 담고 있는 딕셔너리입니다.
-        """
-        try:
-            current_user = _get_request_current_user()
-
-            # 1순위: user_email 파라미터
-            # 2순위: current_user
-            # 3순위: 기본값
-            if user_email is not None:
-                query_email = user_email
-                query_company_cd = "leodev901"
-            elif current_user:
-                query_email = current_user.email
-                query_company_cd = current_user.company_cd
-            else:
-                query_email = "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
-                query_company_cd = "leodev901" #DEFAULT_COMPANY_CD
-
-            path = f"/todo/lists/{task_list_id}/tasks"
-
-            body = {
-                "title": title,
-                "dueDateTime": due_date
-            }
-            
-            result = await graph_request(
-                method="POST",
-                path=path,
-                user_email=query_email,
-                company_cd=query_company_cd,
-                json_body=body
-            )
-
-            return result
-
-        except Exception as e:
-            raise RuntimeError(f"할 일 생성 도중 오류 발생: {str(e)}")
-
+        current_user = get_request_current_user()
+        query_email, query_company_cd = resolve_graph_user(user_email, current_user)
+        return await todo_service.create_task(task_list_id, title, query_email, query_company_cd, due_date)
 
     @mcp.tool()
+    @graph_error_wrapper(as_list=False)
     async def todo_update_task(
-        task_list_id: Annotated[str, "할 일 목록의 ID"],
-        task_id: Annotated[str, "할 일의 ID"],
-        title: Annotated[Optional[str], "할 일의 제목"] = None,
-        user_email: Annotated[Optional[str], "할 일을 수정할 사용자의 이메일 주소"] = None,
-        due_date: Annotated[Optional[str], "할 일의 마감일 (YYYY-MM-DD 형식)"] = None,
-    ) -> dict:
+        task_list_id: Annotated[str, "할 일이 들어 있는 목록 ID입니다."],
+        task_id: Annotated[str, "수정할 할 일 ID입니다."],
+        user_email: Annotated[Optional[str], "수정 대상자의 이메일 주소입니다. 예: user@example.com"] = None,
+        title: Annotated[Optional[str], "변경할 할 일 제목입니다."] = None,
+        due_date: Annotated[Optional[str], "변경할 마감일입니다. YYYY-MM-DD 형식입니다."] = None,
+        status: Annotated[Optional[str], "변경할 상태입니다. 예: notStarted, inProgress, completed"] = None,
+        importance: Annotated[Optional[str], "변경할 중요도입니다. 예: low, normal, high"] = None,
+    ) -> TodoTask:
+        """기존 할 일을 부분 수정합니다.
+
+        [LLM 에이전트 가이드]
+        1. 사용자가 할 일 제목, 마감일, 상태, 중요도를 바꾸고 싶어 할 때 사용합니다.
         """
-        Microsoft Graph API를 사용하여 특정 할 일 목록에 새로운 할 일을 생성합니다.
-
-
-        [LLM 에이전트 사용 가이드]
-        1. 사용자가 "할 일 추가해줘" 혹은 "오늘 할 일 보여줘" 할 일을 확인 할 때 호출하세요. 
-        2. 사용 자가 작업 목록 ID를 명시하지 않은 경우, todo_list_task_lists()를 호출하여 작업 목록 ID를 찾은 뒤, 반한 된 tas_list_id를 사용하여 todo_list_tasks()를 호출해야 합니다.
-        3. 반환값은 딕셔너리(dict) 요소들로 구성된 형태의 리스트(list)입니다. 필요한 항목(제목, 마감일 등)을 가공하여 사용자에게 응답하세요.
-
-        Args:
-            - task_list_id (str): 할 일 목록의 ID (기본값: None)
-            - title (str): 할 일의 제목 (기본값: None)
-            - user_email (str, optional): 할 일을 생성할 사용자의 이메일 주소 (기본값: None)
-            - due_date (str, optional): 할 일의 마감일 (YYYY-MM-DD 형식) (기본값: None)
-
-        Returns:
-            dict: 생성된 할 일 정보를 담고 있는 딕셔너리입니다.
-        """
-        try:
-            current_user = _get_request_current_user()
-
-            # 1순위: user_email 파라미터
-            # 2순위: current_user
-            # 3순위: 기본값
-            if user_email is not None:
-                query_email = user_email
-                query_company_cd = "leodev901"
-            elif current_user:
-                query_email = current_user.email
-                query_company_cd = current_user.company_cd
-            else:
-                query_email = "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
-                query_company_cd = "leodev901" #DEFAULT_COMPANY_CD
-
-            path = f"/todo/lists/{task_list_id}/tasks"
-            
-            result = await graph_request(
-                method="PATCH",
-                path=path,
-                user_email=query_email,
-                company_cd=query_company_cd
-            )
-
-            tasks = result.get("value", [])
-            if not tasks:
-                return []
-            
-            return tasks
-
-        except Exception as e:
-            raise RuntimeError(f"할 일 수정 도중 오류 발생: {str(e)}")
-
+        current_user = get_request_current_user()
+        query_email, query_company_cd = resolve_graph_user(user_email, current_user)
+        return await todo_service.update_task(
+            task_list_id=task_list_id,
+            task_id=task_id,
+            user_email=query_email,
+            company_cd=query_company_cd,
+            title=title,
+            due_date=due_date,
+            status=status,
+            importance=importance,
+        )
 
     @mcp.tool()
+    @graph_error_wrapper(as_list=False)
     async def todo_delete_task(
-        task_list_id: Annotated[str, "할 일 목록의 ID"],
-        task_id: Annotated[str, "할 일의 ID"],
-        user_email: Annotated[Optional[str], "할 일을 삭제할 사용자의 이메일 주소"] = None,
+        task_list_id: Annotated[str, "할 일이 들어 있는 목록 ID입니다."],
+        task_id: Annotated[str, "삭제할 할 일 ID입니다."],
+        user_email: Annotated[Optional[str], "삭제 대상자의 이메일 주소입니다. 예: user@example.com"] = None,
     ) -> dict:
+        """기존 할 일을 삭제합니다.
+
+        [LLM 에이전트 가이드]
+        1. 사용자가 특정 할 일을 삭제해달라고 요청할 때 사용합니다.
         """
-        Microsoft Graph API를 사용하여 특정 할 일 목록에 새로운 할 일을 생성합니다.
-
-
-        [LLM 에이전트 사용 가이드]
-        1. 사용자가 "할 일 추가해줘" 혹은 "오늘 할 일 보여줘" 할 일을 확인 할 때 호출하세요. 
-        2. 사용 자가 작업 목록 ID를 명시하지 않은 경우, todo_list_task_lists()를 호출하여 작업 목록 ID를 찾은 뒤, 반한 된 tas_list_id를 사용하여 todo_list_tasks()를 호출해야 합니다.
-        3. 반환값은 딕셔너리(dict) 요소들로 구성된 형태의 리스트(list)입니다. 필요한 항목(제목, 마감일 등)을 가공하여 사용자에게 응답하세요.
-
-        Args:
-            - task_list_id (str): 할 일 목록의 ID (기본값: None)
-            - title (str): 할 일의 제목 (기본값: None)
-            - user_email (str, optional): 할 일을 생성할 사용자의 이메일 주소 (기본값: None)
-            - due_date (str, optional): 할 일의 마감일 (YYYY-MM-DD 형식) (기본값: None)
-
-        Returns:
-            dict: 생성된 할 일 정보를 담고 있는 딕셔너리입니다.
-        """
-        try:
-            current_user = _get_request_current_user()
-
-            # 1순위: user_email 파라미터
-            # 2순위: current_user
-            # 3순위: 기본값
-            if user_email is not None:
-                query_email = user_email
-                query_company_cd = "leodev901"
-            elif current_user:
-                query_email = current_user.email
-                query_company_cd = current_user.company_cd
-            else:
-                query_email = "admin@leodev901.onmicrosoft.com" #DEFAULT_USER_EMAIL
-                query_company_cd = "leodev901" #DEFAULT_COMPANY_CD
-
-            path = f"/todo/lists/{task_list_id}/tasks"
-            
-            result = await graph_request(
-                method="DELETE",
-                path=path,
-                user_email=query_email,
-                company_cd=query_company_cd
-            )
-
-            tasks = result.get("value", [])
-            if not tasks:
-                return []
-            
-            return tasks
-
-        except Exception as e:
-            raise RuntimeError(f"할 일 삭제 도중 오류 발생: {str(e)}")
+        current_user = get_request_current_user()
+        query_email, query_company_cd = resolve_graph_user(user_email, current_user)
+        return await todo_service.delete_task(task_list_id, task_id, query_email, query_company_cd)

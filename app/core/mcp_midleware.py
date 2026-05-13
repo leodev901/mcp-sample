@@ -1,3 +1,4 @@
+import asyncio
 import time
 from typing import Any
 from datetime import datetime
@@ -15,28 +16,24 @@ from app.models.logging import MCPToolLogRequest
 
 
 
-def logging_message(
-        status:str,
-        tool_name:str,
-        trace_id:str,
-        elapsed_ms:float | None= None,
-        arguments:dict | None= None,
-        current_user:dict | None= None,  
-        input: dict | None= None, 
-        output: dict | None= None,
-        error_message: str | None = None,
-)->None:
-    message=f"[mcp_tool_call] >>> trace_id={trace_id}"
-    message+=f" status={status} tool_name={tool_name}"
-    # message+=f" arguments={arguments if arguments else '-'}"
-    message+=f" elapsed_ms={elapsed_ms if elapsed_ms else '' :.1f}"
-    message+=f" email={current_user.email if current_user else '-'}"
-    message+=f" company_cd={current_user.company_cd if current_user else '-'}"
-    message+=f"\n input={input if input else '-'}"
-    message+=f"\n output={output if output else '-'}"
+def logging_message( record: MCPToolLogRequest)->None:
+    message=f"[mcp_tool_call] >>> trace_id={record.trace_id}"
+    message+=f" status={record.status} "
+    message+=f"tool_name={record.tool_name} "
+    message+=f"arguments={record.arguments} "
+    message+=f"elapsed_ms={record.elapsed_ms} "
+    message+=f"user_id={record.user_id} "
+    message+=f"email={record.email} "
+    message+=f"company_cd={record.company_cd} "
+
+    if record.input is not None:
+        message+=f"input={record.input} "
+    if record.output is not None:
+        message+=f"output={record.output} "
+    if record.error_message is not None:
+        message+=f"error_message={record.error_message} "
     
-    if(status=="error"):
-        message+=f"\n error={error_message}"
+    if(record.status=="error"):
         logger.exception(message)
     else:
         logger.info(message)
@@ -78,6 +75,20 @@ class MCPLoggingMiddleware(Middleware):
         
 
         started = time.perf_counter()
+
+        record = MCPToolLogRequest(
+                trace_id=trace_id,
+                tool_name=tool_name,
+                arguments=arguments,
+                # Pydantic 모델의 필수 필드는 생성 시점에 기본 상태를 명시해 둡니다.
+                elapsed_ms=0.0,
+                status="pending",
+                requested_at=datetime.now(),
+                user_id=current_user.user_id if current_user else None,
+                email=current_user.email if current_user else None,
+                company_cd=current_user.company_cd if current_user else None,
+                input=input_json,
+            )
         try:
             result = await call_next(context)
             elapsed_ms = (time.perf_counter() - started) * 1000.0
@@ -88,51 +99,27 @@ class MCPLoggingMiddleware(Middleware):
                         indent=2,
                         default=str,
                         ) if result.structured_content else None
-    
-            logging_message(
-                status="success",
-                tool_name=tool_name,
-                trace_id=trace_id,
-                elapsed_ms=elapsed_ms,
-                arguments=arguments,
-                current_user=current_user,
-                input=input_json,
-                output=content_json,
-            )
-
-            record = MCPToolLogRequest(
-                trace_id=trace_id,
-                tool_name=tool_name,
-                arguments=arguments,
-                elapsed_ms=elapsed_ms,
-                requestd_at=datetime.now(),
-            )
-            if current_user:
-                record.user_id = current_user.user_id
-                record.email = current_user.email
-                record.company_cd = current_user.company_cd
-            record.input = input_json
+            
+            record.status = "success"
             record.output = content_json
-            record.status = "success"   
             record.responded_at = datetime.now()
-
-            awiat save_mcp_tool_logs(record.dict())
-
-
+            record.elapsed_ms = elapsed_ms
+            
+            
             return result
         except Exception as e: 
             elapsed_ms = (time.perf_counter() - started) * 1000.0
-            logging_message(
-                status="error",
-                tool_name=tool_name,
-                trace_id=trace_id,
-                elapsed_ms=elapsed_ms,
-                arguments=arguments,
-                current_user=current_user,
-                input=input_json,
-                output=None,
-                error_message=f"{type(e).__name__}: {e}",
-                        
-
-            )
+            
+            record.status = "error"
+            record.responded_at = datetime.now()
+            record.elapsed_ms = elapsed_ms
+            record.error_message = f"{type(e).__name__}: {e}"
+            
             raise
+        finally:
+
+            logging_message(record)
+            # save_mcp_tool_logs는 비동기 함수 별도 TASK로 실행
+            asyncio.create_task(save_mcp_tool_logs(record))
+
+

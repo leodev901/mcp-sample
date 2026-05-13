@@ -102,7 +102,7 @@ class HttpLoggingASGIMiddleware:
         log_meesage+=f"\n - headers={headers}" if headers is not None else ""
         log_meesage+=f"\n - body={body}" if body is not None else ""
         log_meesage+=f"\n - error={error_message}" if error_message else ""
-        logger.info(log_meesage)
+        # logger.info(log_meesage)
 
 
 
